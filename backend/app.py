@@ -1,6 +1,13 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
-from src.services import run_november_scenario, run_friday_scenario, run_pe_scenario
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path)
+from src.services import run_november_scenario, run_friday_scenario, run_pe_scenario, run_dynamic_scenario
+from flask import request
 
 app = Flask(__name__)
 # Allow CORS for all domains on all routes starting with /api/*
@@ -30,6 +37,23 @@ def backtest_friday():
 def backtest_pe():
     try:
         results = run_pe_scenario()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/ask', methods=['POST'])
+def ask_question():
+    try:
+        data = request.json
+        if not data or 'query' not in data:
+            return jsonify({"error": "Missing 'query' in request body"}), 400
+            
+        query = data['query']
+        results = run_dynamic_scenario(query)
+        
+        if "error" in results:
+            return jsonify(results), 400
+            
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -101,3 +101,11 @@ class Backtester:
         subset = self.data[condition_mask].copy()
         cols = ['Adj Close'] + [f'FwdReturn_{p}' for p in periods if f'FwdReturn_{p}' in subset.columns]
         return subset[cols]
+
+    def get_baseline_stats(self, periods=['1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']):
+        """
+        Calculates baseline statistics for the entire dataset (control group).
+        """
+        # Create a mask of all True values
+        mask = pd.Series([True] * len(self.data), index=self.data.index)
+        return self.analyze(mask, periods=periods)
