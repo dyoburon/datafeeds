@@ -31,17 +31,34 @@ class DataLoader:
 
     def load_pe_data(self, filepath):
         """
-        Loads P/E data from a CSV.
-        Expected format: Date, PE
+        Loads P/E data from Shiller JSON file.
+        Extracts Date and PE10 (Shiller P/E ratio) columns.
         """
         if not os.path.exists(filepath):
             print(f"Warning: P/E data file not found at {filepath}")
             return None
-            
-        df = pd.read_csv(filepath)
+        
+        import json
+        
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        
+        # Create DataFrame from JSON
+        df = pd.DataFrame(data)
+        
+        # Convert Date to datetime and set as index
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.set_index('Date')
-        return df
+        
+        # Extract just the PE10 column and rename to PE
+        pe_df = df[['PE10']].copy()
+        pe_df = pe_df.rename(columns={'PE10': 'PE'})
+        
+        # Sort by date and remove duplicates
+        pe_df = pe_df.sort_index()
+        pe_df = pe_df[~pe_df.index.duplicated(keep='first')]
+        
+        return pe_df
 
     def merge_data(self, price_df, pe_df):
         """Merges price data with P/E data."""

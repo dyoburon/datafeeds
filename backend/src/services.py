@@ -19,7 +19,7 @@ def get_backtester():
         # Fetching max history available from yfinance
         price_data = loader.fetch_sp500_data(start_date="1927-01-01")
         # Load P/E data
-        pe_data = loader.load_pe_data("backend/data/pe_data.csv")
+        pe_data = loader.load_pe_data("data/flat-ui__data-Sat Nov 22 2025.json")
         # Merge
         df = loader.merge_data(price_data, pe_data)
         bt = Backtester(df)
@@ -87,6 +87,47 @@ def run_pe_scenario():
         "results": results,
         "control": control_results
     }
+
+def run_pe_range_scenario(min_pe, max_pe):
+    """Generic function to run P/E range scenarios"""
+    bt, _ = get_backtester()
+    
+    def condition_pe_range(data):
+        if 'PE' not in data.columns:
+            return pd.Series(False, index=data.index)
+        return (data['PE'] >= min_pe) & (data['PE'] < max_pe)
+
+    periods = ['1Y', '3Y', '5Y', '10Y']
+    mask = bt.filter_dates(condition_pe_range)
+    results = bt.analyze(mask, periods=periods)
+    control_results = bt.get_baseline_stats(periods=periods)
+    
+    return {
+        "results": results,
+        "control": control_results
+    }
+
+def run_pe_16_17():
+    return run_pe_range_scenario(16, 17)
+
+def run_pe_17_18():
+    return run_pe_range_scenario(17, 18)
+
+def run_pe_18_19():
+    return run_pe_range_scenario(18, 19)
+
+def run_pe_19_20():
+    return run_pe_range_scenario(19, 20)
+
+def run_pe_20_21():
+    return run_pe_range_scenario(20, 21)
+
+def run_pe_21_22():
+    return run_pe_range_scenario(21, 22)
+
+def run_pe_22_23():
+    return run_pe_range_scenario(22, 23)
+
 
 def run_dynamic_scenario(query):
     bt, llm = get_backtester()

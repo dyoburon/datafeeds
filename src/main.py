@@ -9,7 +9,7 @@ def main():
     price_data = loader.fetch_sp500_data(start_date="1927-01-01")
     
     # Load P/E data (User needs to provide real data for accurate results)
-    pe_data = loader.load_pe_data("data/pe_data.csv")
+    pe_data = loader.load_pe_data("data/flat-ui__data-Sat Nov 22 2025.json")
     
     # Merge
     df = loader.merge_data(price_data, pe_data)

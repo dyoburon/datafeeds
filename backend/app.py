@@ -6,7 +6,9 @@ import os
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(dotenv_path)
-from src.services import run_november_scenario, run_friday_scenario, run_pe_scenario, run_dynamic_scenario
+from src.services import (run_november_scenario, run_friday_scenario, run_pe_scenario, run_dynamic_scenario,
+                          run_pe_16_17, run_pe_17_18, run_pe_18_19, run_pe_19_20, 
+                          run_pe_20_21, run_pe_21_22, run_pe_22_23)
 from flask import request
 
 app = Flask(__name__)
@@ -37,6 +39,62 @@ def backtest_friday():
 def backtest_pe():
     try:
         results = run_pe_scenario()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-16-17', methods=['GET'])
+def backtest_pe_16_17():
+    try:
+        results = run_pe_16_17()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-17-18', methods=['GET'])
+def backtest_pe_17_18():
+    try:
+        results = run_pe_17_18()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-18-19', methods=['GET'])
+def backtest_pe_18_19():
+    try:
+        results = run_pe_18_19()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-19-20', methods=['GET'])
+def backtest_pe_19_20():
+    try:
+        results = run_pe_19_20()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-20-21', methods=['GET'])
+def backtest_pe_20_21():
+    try:
+        results = run_pe_20_21()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-21-22', methods=['GET'])
+def backtest_pe_21_22():
+    try:
+        results = run_pe_21_22()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/pe-22-23', methods=['GET'])
+def backtest_pe_22_23():
+    try:
+        results = run_pe_22_23()
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -75,6 +75,68 @@ export default function Home() {
                 </button>
             </div>
 
+            {/* P/E Range Buttons */}
+            <div className="max-w-4xl mx-auto mb-8">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800">P/E Ratio Ranges</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <button
+                        onClick={() => runScenario('pe-16-17')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-16-17' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 16-17</h3>
+                        <p className="text-xs text-gray-500">Low valuation</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-17-18')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-17-18' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 17-18</h3>
+                        <p className="text-xs text-gray-500">Below average</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-18-19')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-18-19' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 18-19</h3>
+                        <p className="text-xs text-gray-500">Fair value</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-19-20')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-19-20' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 19-20</h3>
+                        <p className="text-xs text-gray-500">Average</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-20-21')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-20-21' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 20-21</h3>
+                        <p className="text-xs text-gray-500">Above average</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-21-22')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-21-22' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 21-22</h3>
+                        <p className="text-xs text-gray-500">Elevated</p>
+                    </button>
+
+                    <button
+                        onClick={() => runScenario('pe-22-23')}
+                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-22-23' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
+                    >
+                        <h3 className="text-base font-semibold mb-1">P/E 22-23</h3>
+                        <p className="text-xs text-gray-500">High valuation</p>
+                    </button>
+                </div>
+            </div>
+
             {/* Custom Question Section */}
             <div className="max-w-4xl mx-auto mb-12">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
