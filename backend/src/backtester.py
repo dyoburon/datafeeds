@@ -93,6 +93,42 @@ class Backtester:
                 
         return results
 
+    @staticmethod
+    def expand_monthly_mask(monthly_mask, daily_index):
+        """
+        Robustly maps a monthly boolean mask (indexed by month-end) to a daily index.
+        Returns a daily boolean Series where every day in a marked month is True.
+        
+        Args:
+            monthly_mask (pd.Series): Boolean series with DatetimeIndex (usually monthly freq).
+            daily_index (pd.DatetimeIndex): The target daily index.
+        
+        Returns:
+            pd.Series: Boolean series with daily_index.
+        """
+        # Convert both to PeriodIndex ('M') to ignore specific timestamps
+        monthly_periods = monthly_mask.index.to_period('M')
+        
+        # If monthly_mask has duplicate periods (unlikely if from resample), handle it?
+        # But typically it's unique. We'll assume it's a Series.
+        # We need to create a mapper: Period('2023-01') -> True/False
+        
+        # Ensure it is a Series indexed by Period
+        period_mask = monthly_mask.copy()
+        period_mask.index = monthly_periods
+        
+        # Create daily periods
+        daily_periods = daily_index.to_period('M')
+        
+        # Map
+        daily_result = daily_periods.map(period_mask)
+        
+        # Convert Index/array back to Series
+        daily_series = pd.Series(daily_result, index=daily_index)
+        
+        # Fill NaNs (months not in the mask) with False
+        return daily_series.fillna(False).astype(bool)
+
     def get_signals(self, condition_mask, periods=['1M']):
         """
         Returns a dataframe with the signal dates and their forward returns.

@@ -7,25 +7,53 @@ class DataLoader:
         self.ticker = "^GSPC"
 
     def fetch_sp500_data(self, start_date="1920-01-01"):
-        """Fetches S&P 500 data from yfinance."""
-        print(f"Fetching {self.ticker} data from {start_date}...")
-        df = yf.download(self.ticker, start=start_date, progress=False)
+        """Fetches S&P 500 data AND additional reference tickers from yfinance."""
+        print(f"Fetching {self.ticker} and additional data from {start_date}...")
         
-        # Flatten multi-index columns if present (common in newer yfinance)
+        # 1. Fetch Primary (S&P 500)
+        df = self._fetch_ticker(self.ticker, start_date)
+        
+        # 2. Fetch Additional Tickers (Equal Weight, Crypto, Yields, VIX)
+        # Note: Some start much later than 1920.
+        additional_tickers = {
+            'RSP': 'RSP',       # S&P 500 Equal Weight (Breadth Proxy)
+            'HYG': 'HYG',       # High Yield Bonds (Credit Risk)
+            'BTC-USD': 'BTC',   # Bitcoin (Risk-On Sentiment)
+            '^TNX': 'TNX',      # 10-Year Treasury Yield
+            '^VIX': 'VIX'       # Volatility Index
+        }
+        
+        for ticker, name in additional_tickers.items():
+            try:
+                aux_df = self._fetch_ticker(ticker, start_date)
+                # Join on 'Adj Close' mostly
+                aux_close = aux_df['Adj Close']
+                aux_close.name = name  # Rename series to the simple name
+                
+                # Left join to the main S&P df to keep its index as master
+                df = df.join(aux_close, how='left')
+                
+            except Exception as e:
+                print(f"Warning: Failed to fetch {name} ({ticker}): {e}")
+
+        return df
+
+    def _fetch_ticker(self, symbol, start_date):
+        """Helper to fetch and clean a single ticker."""
+        df = yf.download(symbol, start=start_date, progress=False)
+        
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
             
-        # Ensure index is datetime
         df.index = pd.to_datetime(df.index)
         
-        # Calculate returns if not present
-        close_col = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
-        if 'Return' not in df.columns:
-            df['Return'] = df[close_col].pct_change()
-            
-        # Standardize on 'Adj Close' for downstream compatibility
-        if 'Adj Close' not in df.columns:
+        # Basic cleanup
+        if 'Adj Close' not in df.columns and 'Close' in df.columns:
             df['Adj Close'] = df['Close']
+            
+        # Calculate Return for this specific ticker
+        if 'Return' not in df.columns and 'Adj Close' in df.columns:
+            df['Return'] = df['Adj Close'].pct_change()
             
         return df
 
@@ -97,7 +125,12 @@ class DataLoader:
         try:
             ticker = yf.Ticker(self.ticker)
             news = ticker.news[:8] # Get raw top 8
-            headlines = [n['title'] for n in news]
+            headlines = []
+            for n in news:
+                if 'title' in n:
+                    headlines.append(n['title'])
+                elif 'content' in n and 'title' in n['content']:
+                    headlines.append(n['content']['title'])
         except Exception as e:
             print(f"News fetch error: {e}")
             headlines = ["No news available"]

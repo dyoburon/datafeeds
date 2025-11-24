@@ -207,18 +207,35 @@ export default function Home() {
                                 </div>
 
                                 <div>
-                                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Suggested Analysis</h4>
+                                    <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Suggested Analysis (with Predictive Score)</h4>
                                     <div className="grid grid-cols-1 gap-2">
-                                        {dailyInsights.data.questions.map((q: string, i: number) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => handleAsk(q)}
-                                                className="text-left p-3 rounded-lg border border-indigo-100 hover:bg-indigo-50 hover:border-indigo-300 transition-colors flex justify-between items-center group"
-                                            >
-                                                <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-900">{q}</span>
-                                                <span className="text-indigo-400 group-hover:text-indigo-600">→</span>
-                                            </button>
-                                        ))}
+                                        {dailyInsights.data.questions.map((item: any, i: number) => {
+                                            // Handle both old format (string) and new format (object)
+                                            const questionText = typeof item === 'string' ? item : item.question;
+                                            const score = typeof item === 'string' ? null : item.predictive_score;
+                                            
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => handleAsk(questionText)}
+                                                    className="text-left p-3 rounded-lg border border-indigo-100 hover:bg-indigo-50 hover:border-indigo-300 transition-colors flex justify-between items-center group"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        {score !== null && (
+                                                            <div className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                                                score >= 80 ? 'bg-green-100 text-green-700' : 
+                                                                score >= 50 ? 'bg-yellow-100 text-yellow-700' : 
+                                                                'bg-gray-100 text-gray-500'
+                                                            }`}>
+                                                                {score}
+                                                            </div>
+                                                        )}
+                                                        <span className="text-sm font-medium text-gray-700 group-hover:text-indigo-900">{questionText}</span>
+                                                    </div>
+                                                    <span className="text-indigo-400 group-hover:text-indigo-600">→</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </div>

@@ -180,8 +180,11 @@ def run_pe_22_23():
 
 
 def _execute_code(code, bt):
-    # Safe execution dictionary
-    local_scope = {'pd': pd}
+    # Safe execution dictionary - Include Backtester helper methods in the scope!
+    local_scope = {
+        'pd': pd,
+        'expand_monthly_mask': bt.expand_monthly_mask # Inject helper function
+    }
     
     try:
         # Execute the generated code to define the 'condition' function
