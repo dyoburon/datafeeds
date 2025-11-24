@@ -72,3 +72,34 @@ class DataLoader:
         merged = price_df.copy()
         merged['PE'] = pe_reindexed['PE']
         return merged
+
+    def get_market_context(self, df):
+        """
+        Fetches today's technical stats and top news to feed the LLM.
+        """
+        # 1. Technical Stats
+        today = df.iloc[-1]
+        # Ensure we have enough data
+        if len(df) < 30:
+             prev_30 = df
+        else:
+             prev_30 = df.iloc[-30:]
+        
+        stats = {
+            "date": str(today.name.date()),
+            "close": round(today['Adj Close'], 2),
+            "return_pct": round(today['Return'] * 100, 2),
+            "volume_rel": round(today['Volume'] / prev_30['Volume'].mean(), 2) if prev_30['Volume'].mean() != 0 else 0,
+            "volatility_rank": round(today['Return'] / prev_30['Return'].std(), 2) if prev_30['Return'].std() != 0 else 0
+        }
+
+        # 2. News Headlines (Top 8)
+        try:
+            ticker = yf.Ticker(self.ticker)
+            news = ticker.news[:8] # Get raw top 8
+            headlines = [n['title'] for n in news]
+        except Exception as e:
+            print(f"News fetch error: {e}")
+            headlines = ["No news available"]
+
+        return stats, headlines

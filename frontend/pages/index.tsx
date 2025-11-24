@@ -1,268 +1,160 @@
-import { useState } from 'react';
-import axios from 'axios';
+import Head from 'next/head';
+import Link from 'next/link';
 
-export default function Home() {
-    const [results, setResults] = useState<any>(null);
-    const [loading, setLoading] = useState(false);
-    const [activeScenario, setActiveScenario] = useState<string>('');
-    const [error, setError] = useState<string>('');
-    const [query, setQuery] = useState<string>('');
+export default function LandingPage() {
+  return (
+    <div className="min-h-screen bg-white font-sans text-gray-900">
+      <Head>
+        <title>Prism - Curated Market Intelligence</title>
+        <meta name="description" content="Build your own daily financial data feed. Filter out the noise." />
+      </Head>
 
-    const runScenario = async (scenario: string) => {
-        setLoading(true);
-        setResults(null);
-        setActiveScenario(scenario);
-        setError('');
-
-        try {
-            const response = await axios.get(`http://localhost:5001/api/backtest/${scenario}`);
-            setResults(response.data);
-        } catch (err: any) {
-            setError(err.message || 'An error occurred');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAsk = async () => {
-        if (!query.trim()) return;
-
-        setLoading(true);
-        setResults(null);
-        setActiveScenario('custom');
-        setError('');
-
-        try {
-            const response = await axios.post('http://localhost:5001/api/backtest/ask', { query });
-            setResults(response.data);
-        } catch (err: any) {
-            setError(err.response?.data?.error || err.message || 'An error occurred');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="min-h-screen p-8 font-sans bg-gray-50">
-            <header className="mb-10 text-center">
-                <h1 className="text-4xl font-bold text-gray-900 mb-2">Antigravity Backtester</h1>
-                <p className="text-gray-600">Analyze historical S&P 500 trends with one click or ask your own questions.</p>
-            </header>
-
-            <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <button
-                    onClick={() => runScenario('november')}
-                    className={`p-6 rounded-xl shadow-sm border transition-all ${activeScenario === 'november' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                >
-                    <h3 className="text-lg font-semibold mb-2">November Negative</h3>
-                    <p className="text-sm text-gray-500">Returns after a negative November.</p>
-                </button>
-
-                <button
-                    onClick={() => runScenario('friday')}
-                    className={`p-6 rounded-xl shadow-sm border transition-all ${activeScenario === 'friday' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                >
-                    <h3 className="text-lg font-semibold mb-2">Friday Negative</h3>
-                    <p className="text-sm text-gray-500">Returns the week after a negative Friday.</p>
-                </button>
-
-                <button
-                    onClick={() => runScenario('pe')}
-                    className={`p-6 rounded-xl shadow-sm border transition-all ${activeScenario === 'pe' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                >
-                    <h3 className="text-lg font-semibold mb-2">High P/E (&gt;23)</h3>
-                    <p className="text-sm text-gray-500">Long-term returns when valuation is high.</p>
-                </button>
-            </div>
-
-            {/* P/E Range Buttons */}
-            <div className="max-w-4xl mx-auto mb-8">
-                <h2 className="text-xl font-semibold mb-4 text-gray-800">P/E Ratio Ranges</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-                    <button
-                        onClick={() => runScenario('pe-16-17')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-16-17' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 16-17</h3>
-                        <p className="text-xs text-gray-500">Low valuation</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-17-18')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-17-18' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 17-18</h3>
-                        <p className="text-xs text-gray-500">Below average</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-18-19')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-18-19' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 18-19</h3>
-                        <p className="text-xs text-gray-500">Fair value</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-19-20')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-19-20' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 19-20</h3>
-                        <p className="text-xs text-gray-500">Average</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-20-21')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-20-21' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 20-21</h3>
-                        <p className="text-xs text-gray-500">Above average</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-21-22')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-21-22' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 21-22</h3>
-                        <p className="text-xs text-gray-500">Elevated</p>
-                    </button>
-
-                    <button
-                        onClick={() => runScenario('pe-22-23')}
-                        className={`p-4 rounded-lg shadow-sm border transition-all ${activeScenario === 'pe-22-23' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:shadow-md'}`}
-                    >
-                        <h3 className="text-base font-semibold mb-1">P/E 22-23</h3>
-                        <p className="text-xs text-gray-500">High valuation</p>
-                    </button>
-                </div>
-            </div>
-
-            {/* Custom Question Section */}
-            <div className="max-w-4xl mx-auto mb-12">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h3 className="text-lg font-semibold mb-4">Ask a Custom Question</h3>
-                    <div className="flex gap-4">
-                        <input
-                            type="text"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder="e.g., When the market drops 5% in a week..."
-                            className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                            onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
-                        />
-                        <button
-                            onClick={handleAsk}
-                            disabled={loading || !query.trim()}
-                            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                            Ask Gemini
-                        </button>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-2">
-                        Powered by Gemini 3. Queries are converted to Python code and executed against historical data.
-                    </p>
-                </div>
-            </div>
-
-            <div className="max-w-4xl mx-auto">
-                {loading && (
-                    <div className="text-center py-12">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                        <p className="text-gray-500">Crunching 100 years of data...</p>
-                    </div>
-                )}
-
-                {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative mb-8" role="alert">
-                        <strong className="font-bold">Error: </strong>
-                        <span className="block sm:inline">{error}</span>
-                    </div>
-                )}
-
-                {results && !loading && (
-                    <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
-                        <h2 className="text-2xl font-bold mb-6 border-b pb-4">Results</h2>
-
-                        {/* Generated Code Display (for custom queries) */}
-                        {results.generated_code && (
-                            <div className="mb-8 bg-gray-900 rounded-lg p-4 overflow-x-auto">
-                                <p className="text-gray-400 text-xs mb-2 uppercase font-bold">Generated Logic</p>
-                                <pre className="text-green-400 font-mono text-sm">{results.generated_code}</pre>
-                            </div>
-                        )}
-
-                        {/* Stats Display */}
-                        <div className="mb-6">
-                            {results.count !== undefined && (
-                                <div className="flex items-baseline gap-2">
-                                    <span className="text-gray-500">Occurrences Found:</span>
-                                    <span className="text-xl font-bold">{results.count}</span>
-                                </div>
-                            )}
-                            {results.results && results.results.count !== undefined && (
-                                <div className="flex items-baseline gap-2">
-                                    <span className="text-gray-500">Occurrences Found:</span>
-                                    <span className="text-xl font-bold">{results.results.count}</span>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                            {/* Handle both standard results and dynamic results structure */}
-                            {Object.keys(results.results || results).filter(k => k !== 'count' && k !== 'generated_code' && k !== 'control').map((period) => {
-                                const data = (results.results || results)[period];
-                                const controlData = results.control ? results.control[period] : null;
-
-                                if (!data || data === "Data not available") return null;
-
-                                return (
-                                    <div key={period} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                        <h4 className="text-sm font-bold text-gray-500 uppercase mb-3">{period} Later</h4>
-
-                                        <div className="space-y-3">
-                                            {/* Signal Stats */}
-                                            <div>
-                                                <div className="text-xs text-gray-400 mb-1">Signal</div>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-sm text-gray-600">Mean:</span>
-                                                    <span className={`font-mono font-bold ${data.mean > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {(data.mean * 100).toFixed(2)}%
-                                                    </span>
-                                                </div>
-                                                {data.win_rate !== undefined && (
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="text-sm text-gray-600">Win Rate:</span>
-                                                        <span className="font-mono text-gray-800">{(data.win_rate * 100).toFixed(1)}%</span>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Control Stats (if available) */}
-                                            {controlData && (
-                                                <div className="pt-2 border-t border-gray-200">
-                                                    <div className="text-xs text-gray-400 mb-1">Control (Baseline)</div>
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="text-sm text-gray-600">Mean:</span>
-                                                        <span className="font-mono text-gray-500">
-                                                            {(controlData.mean * 100).toFixed(2)}%
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="text-sm text-gray-600">Win Rate:</span>
-                                                        <span className="font-mono text-gray-500">
-                                                            {(controlData.win_rate * 100).toFixed(1)}%
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-            </div>
+      {/* Navigation */}
+      <nav className="max-w-7xl mx-auto px-6 py-6 flex justify-between items-center">
+        <div className="text-2xl font-bold tracking-tight text-blue-900">Prism</div>
+        <div className="space-x-8 hidden md:flex items-center">
+          <a href="#how-it-works" className="text-gray-600 hover:text-blue-600 transition-colors">How it Works</a>
+          <a href="#features" className="text-gray-600 hover:text-blue-600 transition-colors">Features</a>
+          <Link href="/app">
+            <a className="bg-blue-600 text-white px-5 py-2 rounded-full font-medium hover:bg-blue-700 transition-all shadow-sm hover:shadow-md">
+              Launch App
+            </a>
+          </Link>
         </div>
-    )
+      </nav>
+
+      {/* Hero Section */}
+      <section className="max-w-7xl mx-auto px-6 py-20 md:py-32 text-center">
+        <div className="max-w-3xl mx-auto">
+          <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-8 text-gray-900 leading-tight">
+            The Signal Without <br className="hidden md:block" />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">The Noise.</span>
+          </h1>
+          <p className="text-xl text-gray-600 mb-10 leading-relaxed">
+            Most financial newsletters are 90% fluff. Build your own curated data feed. 
+            Define your filters with natural language, backtest them, and get a custom morning briefing with only the stats that matter to you.
+          </p>
+          <div className="flex flex-col md:flex-row justify-center gap-4">
+            <Link href="/app">
+              <a className="px-8 py-4 bg-blue-600 text-white rounded-lg font-semibold text-lg hover:bg-blue-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5">
+                Start Building Your Feed
+              </a>
+            </Link>
+            <button className="px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-lg font-semibold text-lg hover:bg-gray-50 transition-all">
+              View Demo
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* The Problem / Solution */}
+      <section className="bg-gray-50 py-20">
+        <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
+          <div>
+            <div className="uppercase text-sm font-bold text-blue-600 tracking-wider mb-2">The Problem</div>
+            <h2 className="text-3xl font-bold mb-6">Your inbox is full of things you don't care about.</h2>
+            <p className="text-lg text-gray-600 mb-6">
+              Traditional market data feeds are "one size fits all." You sift through paragraphs of jargon to find one relevant statistic. It's inefficient and distracting.
+            </p>
+            <div className="p-6 bg-white rounded-xl shadow-sm border border-gray-100 opacity-75 grayscale">
+              <div className="h-4 bg-gray-200 rounded w-1/3 mb-4"></div>
+              <div className="h-3 bg-gray-100 rounded w-full mb-2"></div>
+              <div className="h-3 bg-gray-100 rounded w-full mb-2"></div>
+              <div className="h-3 bg-gray-100 rounded w-3/4"></div>
+            </div>
+          </div>
+          <div>
+            <div className="uppercase text-sm font-bold text-green-600 tracking-wider mb-2">The Solution</div>
+            <h2 className="text-3xl font-bold mb-6">A funnel designed by you, for you.</h2>
+            <p className="text-lg text-gray-600 mb-6">
+              Instead of reading everything, define what you're looking for. We turn your ideas into code that scans the market and delivers only the hits.
+            </p>
+            <ul className="space-y-4">
+              <li className="flex items-center gap-3">
+                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600">✓</div>
+                <span className="font-medium text-gray-700">Filter by specific technical setups</span>
+              </li>
+              <li className="flex items-center gap-3">
+                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600">✓</div>
+                <span className="font-medium text-gray-700">Backtest ideas instantly against history</span>
+              </li>
+              <li className="flex items-center gap-3">
+                <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600">✓</div>
+                <span className="font-medium text-gray-700">Receive a clean, stats-only morning report</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* How it Works */}
+      <section id="how-it-works" className="py-20">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-bold mb-4">How it Works</h2>
+            <p className="text-xl text-gray-600">From idea to automated intelligence in three steps.</p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            {/* Step 1 */}
+            <div className="p-8 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-xl mb-6">1</div>
+              <h3 className="text-xl font-bold mb-3">Describe Your Funnel</h3>
+              <p className="text-gray-600">
+                Use plain English to describe the market conditions you're interested in. 
+                <br/><span className="text-sm italic text-gray-500 mt-2 block">"Show me stocks where volume is up 50% and price is down."</span>
+              </p>
+            </div>
+
+            {/* Step 2 */}
+            <div className="p-8 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-600 font-bold text-xl mb-6">2</div>
+              <h3 className="text-xl font-bold mb-3">Validate with Data</h3>
+              <p className="text-gray-600">
+                We instantly build a backtest script to check your hypothesis against 100 years of market data. See if your signal actually works before you track it.
+              </p>
+            </div>
+
+            {/* Step 3 */}
+            <div className="p-8 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 font-bold text-xl mb-6">3</div>
+              <h3 className="text-xl font-bold mb-3">Automate Your Feed</h3>
+              <p className="text-gray-600">
+                Turn successful tests into a recurring job. Every morning, we run your logic and send you a digest of just the tickers that match your criteria.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
+      <section className="bg-blue-900 text-white py-20">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2 className="text-3xl md:text-4xl font-bold mb-6">Ready to build your own newsletter?</h2>
+          <p className="text-blue-100 text-lg mb-10">
+            Stop relying on other people's filters. Create your own edge with data-backed signals.
+          </p>
+          <Link href="/app">
+            <a className="inline-block px-8 py-4 bg-white text-blue-900 rounded-lg font-bold text-lg hover:bg-blue-50 transition-all">
+              Get Started Now
+            </a>
+          </Link>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-50 py-12 border-t border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="text-gray-400 text-sm">
+            © 2025 Prism. All rights reserved.
+          </div>
+          <div className="flex gap-6 text-sm text-gray-500">
+            <a href="#" className="hover:text-blue-600">Privacy Policy</a>
+            <a href="#" className="hover:text-blue-600">Terms of Service</a>
+            <a href="#" className="hover:text-blue-600">Contact</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
 }

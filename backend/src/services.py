@@ -2,15 +2,19 @@ import pandas as pd
 from .data_loader import DataLoader
 from .backtester import Backtester
 from .llm_service import LLMService
-import pandas as pd
+import json
+import os
+import uuid
+import numpy as np
 
 # Global instances (simple in-memory cache)
 loader = None
 price_data = None
 pe_data = None
-pe_data = None
 bt = None
 llm_service = None
+
+SAVED_QUERIES_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'saved_queries.json')
 
 def get_backtester():
     global loader, price_data, pe_data, bt, llm_service
@@ -28,6 +32,35 @@ def get_backtester():
         llm_service = LLMService()
         
     return bt, llm_service
+
+def format_signals(signals_df, max_samples=3000):
+    """
+    Formats the signals dataframe into a list of dictionaries for the frontend.
+    Handles nan values to ensure valid JSON.
+    Limits the number of points to max_samples to prevent frontend lag.
+    """
+    # Cap the number of points to prevent frontend lag
+    if len(signals_df) > max_samples:
+        # Random sample then sort by index to keep chronological order
+        signals_df = signals_df.sample(n=max_samples, random_state=42).sort_index()
+
+    records = []
+    for index, row in signals_df.iterrows():
+        record = {
+            'date': index.strftime('%Y-%m-%d'),
+            'price': row['Adj Close']
+        }
+        for col in row.index:
+            if col.startswith('FwdReturn_'):
+                period = col.replace('FwdReturn_', '')
+                val = row[col]
+                # Handle NaN/Infinity for JSON serialization
+                if pd.isna(val) or np.isinf(val):
+                    record[period] = None
+                else:
+                    record[period] = val
+        records.append(record)
+    return records
 
 def run_november_scenario():
     bt, _ = get_backtester()
@@ -49,9 +82,14 @@ def run_november_scenario():
     results = bt.analyze(mask, periods=periods)
     control_results = bt.get_baseline_stats(periods=periods)
     
+    # Get raw signals for charting
+    signals_df = bt.get_signals(mask, periods=periods)
+    signals_data = format_signals(signals_df)
+    
     return {
         "results": results,
-        "control": control_results
+        "control": control_results,
+        "signals": signals_data
     }
 
 def run_friday_scenario():
@@ -65,9 +103,13 @@ def run_friday_scenario():
     results = bt.analyze(mask, periods=periods)
     control_results = bt.get_baseline_stats(periods=periods)
     
+    signals_df = bt.get_signals(mask, periods=periods)
+    signals_data = format_signals(signals_df)
+    
     return {
         "results": results,
-        "control": control_results
+        "control": control_results,
+        "signals": signals_data
     }
 
 def run_pe_scenario():
@@ -83,9 +125,13 @@ def run_pe_scenario():
     results = bt.analyze(mask, periods=periods)
     control_results = bt.get_baseline_stats(periods=periods)
     
+    signals_df = bt.get_signals(mask, periods=periods)
+    signals_data = format_signals(signals_df)
+    
     return {
         "results": results,
-        "control": control_results
+        "control": control_results,
+        "signals": signals_data
     }
 
 def run_pe_range_scenario(min_pe, max_pe):
@@ -102,9 +148,13 @@ def run_pe_range_scenario(min_pe, max_pe):
     results = bt.analyze(mask, periods=periods)
     control_results = bt.get_baseline_stats(periods=periods)
     
+    signals_df = bt.get_signals(mask, periods=periods)
+    signals_data = format_signals(signals_df)
+    
     return {
         "results": results,
-        "control": control_results
+        "control": control_results,
+        "signals": signals_data
     }
 
 def run_pe_16_17():
@@ -129,16 +179,7 @@ def run_pe_22_23():
     return run_pe_range_scenario(22, 23)
 
 
-def run_dynamic_scenario(query):
-    bt, llm = get_backtester()
-    
-    # Generate code from LLM
-    code = llm.generate_backtest_condition(query)
-    if not code:
-        return {"error": "Failed to generate condition from query"}
-        
-    print(f"Generated code for query '{query}':\n{code}")
-    
+def _execute_code(code, bt):
     # Safe execution dictionary
     local_scope = {'pd': pd}
     
@@ -155,19 +196,105 @@ def run_dynamic_scenario(query):
         mask = bt.filter_dates(condition_func)
         
         # Analyze specific results
-        # We'll use a broad set of periods since we don't know what the user wants
         periods = ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']
         results = bt.analyze(mask, periods=periods)
         
         # Get baseline (control) stats
         control_results = bt.get_baseline_stats(periods=periods)
         
+        # Get raw signals
+        signals_df = bt.get_signals(mask, periods=periods)
+        signals_data = format_signals(signals_df)
+        
         return {
             "results": results,
             "control": control_results,
+            "signals": signals_data,
             "generated_code": code
         }
         
     except Exception as e:
         print(f"Error executing dynamic scenario: {e}")
         return {"error": f"Error executing generated condition: {str(e)}"}
+
+def run_dynamic_scenario(query):
+    bt, llm = get_backtester()
+    
+    # Generate code from LLM
+    code = llm.generate_backtest_condition(query)
+    if not code:
+        return {"error": "Failed to generate condition from query"}
+        
+    print(f"Generated code for query '{query}':\n{code}")
+    
+    return _execute_code(code, bt)
+
+def save_custom_query(name, description, code, original_query):
+    try:
+        queries = []
+        if os.path.exists(SAVED_QUERIES_FILE):
+            with open(SAVED_QUERIES_FILE, 'r') as f:
+                try:
+                    queries = json.load(f)
+                except json.JSONDecodeError:
+                    queries = []
+        
+        new_query = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "description": description,
+            "code": code,
+            "original_query": original_query
+        }
+        
+        queries.append(new_query)
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(SAVED_QUERIES_FILE), exist_ok=True)
+        
+        with open(SAVED_QUERIES_FILE, 'w') as f:
+            json.dump(queries, f, indent=2)
+            
+        return new_query
+    except Exception as e:
+        return {"error": f"Failed to save query: {str(e)}"}
+
+def get_saved_queries():
+    try:
+        if os.path.exists(SAVED_QUERIES_FILE):
+            with open(SAVED_QUERIES_FILE, 'r') as f:
+                try:
+                    return json.load(f)
+                except json.JSONDecodeError:
+                    return []
+        return []
+    except Exception as e:
+        print(f"Error reading saved queries: {e}")
+        return []
+
+def run_saved_query(query_id):
+    bt, _ = get_backtester()
+    queries = get_saved_queries()
+    query = next((q for q in queries if q['id'] == query_id), None)
+    
+    if not query:
+        return {"error": "Query not found"}
+        
+    return _execute_code(query['code'], bt)
+
+def run_daily_insight_generation():
+    bt, llm = get_backtester()
+    
+    # Need loader to get context, but loader is global.
+    # Ensure loader is initialized
+    if loader is None:
+        # get_backtester initializes it
+        get_backtester()
+        
+    # Get Data
+    stats, headlines = loader.get_market_context(bt.data)
+    
+    # Get Analysis
+    analysis = llm.generate_daily_insights(stats, headlines)
+    
+    return analysis

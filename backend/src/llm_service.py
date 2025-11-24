@@ -72,3 +72,54 @@ class LLMService:
         except Exception as e:
             print(f"Error generating code from LLM: {e}")
             return ""
+
+    def generate_daily_insights(self, market_stats, headlines):
+        """
+        Analyzes the day and returns a JSON with a score and questions.
+        """
+        import json
+        
+        prompt = f"""
+        You are a Senior Market Analyst. Analyze today's market data and news.
+        
+        ### Market Data
+        - Date: {market_stats['date']}
+        - Return: {market_stats['return_pct']}%
+        - Relative Volume: {market_stats['volume_rel']}x normal
+        - Volatility Rank: {market_stats['volatility_rank']} (Z-Score)
+        
+        ### Top Headlines
+        {json.dumps(headlines, indent=2)}
+        
+        ### Task
+        1. Select the top 3 most relevant headlines that explain today's move.
+        2. Rate the "Intrigue Level" (0-100) of today. Is this a common day (low score) or an outlier/turning point (high score)?
+        3. Generate 3 backtesting questions to see if this pattern has happened before.
+        
+        ### Output Format (JSON ONLY)
+        {{
+            "intrigue_score": 75,
+            "summary": "Market rallied on low volume despite hawkish Fed news.",
+            "top_news": ["Headline 1", "Headline 2"],
+            "questions": [
+                "How does the market perform 1 week after a >1% gain on low volume?",
+                "What happens when the market diverges from a major negative news headline?",
+                "Win rate of 'Turnaround Tuesdays' after a red Monday?"
+            ]
+        }}
+        """
+        
+        try:
+            response = self.model.generate_content(prompt)
+            # Clean up markdown
+            text = response.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip())
+        except Exception as e:
+            print(f"LLM Insight Error: {e}")
+            return {"intrigue_score": 0, "error": str(e)}

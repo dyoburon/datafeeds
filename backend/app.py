@@ -8,7 +8,8 @@ dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(dotenv_path)
 from src.services import (run_november_scenario, run_friday_scenario, run_pe_scenario, run_dynamic_scenario,
                           run_pe_16_17, run_pe_17_18, run_pe_18_19, run_pe_19_20, 
-                          run_pe_20_21, run_pe_21_22, run_pe_22_23)
+                          run_pe_20_21, run_pe_21_22, run_pe_22_23,
+                          save_custom_query, get_saved_queries, run_saved_query, run_daily_insight_generation)
 from flask import request
 
 app = Flask(__name__)
@@ -112,6 +113,70 @@ def ask_question():
         if "error" in results:
             return jsonify(results), 400
             
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/save', methods=['POST'])
+def save_query_endpoint():
+    try:
+        data = request.json
+        required = ['name', 'description', 'code', 'original_query']
+        if not all(k in data for k in required):
+            return jsonify({"error": f"Missing required fields: {required}"}), 400
+            
+        result = save_custom_query(
+            data['name'], 
+            data['description'], 
+            data['code'], 
+            data['original_query']
+        )
+        
+        if "error" in result:
+            return jsonify(result), 500
+            
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/insights/daily', methods=['GET'])
+def get_daily_insights():
+    try:
+        # Get Analysis
+        analysis = run_daily_insight_generation()
+        
+        # Filter logic (The "Gatekeeper")
+        if analysis.get('intrigue_score', 0) < 70:
+            return jsonify({
+                "status": "skipped",
+                "message": "Today was not interesting enough (Score < 70)",
+                "score": analysis.get('intrigue_score'),
+                "data": analysis # return data anyway for debug/inspection if needed
+            })
+            
+        return jsonify({
+            "status": "success",
+            "data": analysis
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/saved', methods=['GET'])
+def list_saved_queries():
+    try:
+        queries = get_saved_queries()
+        return jsonify(queries)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/backtest/saved/<query_id>', methods=['GET'])
+def run_saved_query_endpoint(query_id):
+    try:
+        results = run_saved_query(query_id)
+        if "error" in results:
+            status_code = 404 if results["error"] == "Query not found" else 400
+            return jsonify(results), status_code
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
