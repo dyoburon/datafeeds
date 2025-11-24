@@ -179,7 +179,7 @@ def run_pe_22_23():
     return run_pe_range_scenario(22, 23)
 
 
-def _execute_code(code, bt):
+def _execute_code(code, bt, custom_periods=None):
     # Safe execution dictionary - Include Backtester helper methods in the scope!
     local_scope = {
         'pd': pd,
@@ -199,7 +199,9 @@ def _execute_code(code, bt):
         mask = bt.filter_dates(condition_func)
         
         # Analyze specific results
-        periods = ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']
+        # Use custom periods if provided, otherwise default
+        periods = custom_periods if custom_periods else ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']
+        
         results = bt.analyze(mask, periods=periods)
         
         # Get baseline (control) stats
@@ -223,14 +225,21 @@ def _execute_code(code, bt):
 def run_dynamic_scenario(query):
     bt, llm = get_backtester()
     
-    # Generate code from LLM
-    code = llm.generate_backtest_condition(query)
-    if not code:
+    # Generate code from LLM (now returns dict with code and periods)
+    llm_result = llm.generate_backtest_condition(query)
+    
+    # Handle failure
+    if not llm_result or not isinstance(llm_result, dict) or not llm_result.get('code'):
         return {"error": "Failed to generate condition from query"}
         
-    print(f"Generated code for query '{query}':\n{code}")
+    code = llm_result['code']
+    periods = llm_result.get('periods')
     
-    return _execute_code(code, bt)
+    print(f"Generated code for query '{query}':\n{code}")
+    if periods:
+        print(f"Extracted periods: {periods}")
+    
+    return _execute_code(code, bt, custom_periods=periods)
 
 def save_custom_query(name, description, code, original_query):
     try:
