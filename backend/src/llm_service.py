@@ -205,6 +205,7 @@ class LLMService:
         ### Output Format (JSON ONLY)
         {{
             "intrigue_score": 75,
+            "date": "{market_stats['date']}",
             "summary": "...",
             "top_news": ["..."],
             "questions": [

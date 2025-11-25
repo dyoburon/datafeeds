@@ -19,6 +19,7 @@ export default function Home() {
 
     useEffect(() => {
         fetchSavedQueries();
+        fetchDailyInsights(false);
     }, []);
 
     const fetchDailyInsights = async (forceReset = false) => {
@@ -175,40 +176,31 @@ export default function Home() {
 
             {/* Daily Insights Section */}
             <div className="max-w-4xl mx-auto mb-8">
-                <div className="flex gap-2">
-                    <button 
-                        onClick={() => fetchDailyInsights(false)}
-                        disabled={insightsLoading}
-                        className="flex-1 bg-gradient-to-r from-indigo-600 to-blue-600 text-white p-4 rounded-xl shadow-lg hover:shadow-2xl transition-all flex items-center justify-center gap-2 font-semibold text-lg border border-indigo-500"
-                    >
-                        {insightsLoading ? (
-                            <>
-                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                Analyzing Market Data...
-                            </>
-                        ) : (
-                            <>
-                                <span>✨</span> Analyze Today's Market Patterns
-                            </>
-                        )}
-                    </button>
-                    
-                    <button 
-                        onClick={() => fetchDailyInsights(true)}
-                        disabled={insightsLoading}
-                        title="Force Reset Analysis"
-                        className="bg-gray-800 text-gray-400 p-4 rounded-xl shadow-md hover:bg-gray-700 hover:text-white transition-all border border-gray-700 flex items-center justify-center"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                    </button>
-                </div>
+                {/* Loading State */}
+                {insightsLoading && !dailyInsights && (
+                    <div className="flex flex-col items-center justify-center p-12 bg-gray-800 rounded-xl border border-indigo-900/50 animate-pulse">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-4"></div>
+                        <p className="text-indigo-300 font-semibold">Analyzing Today's Market Patterns...</p>
+                        <p className="text-gray-500 text-xs mt-2">Consulting Gemini 3 Pro & Historical Data</p>
+                    </div>
+                )}
 
                 {dailyInsights && (
                     <div className="mt-4 bg-gray-800 rounded-xl shadow-md border border-indigo-900/50 overflow-hidden animate-fade-in">
                         {dailyInsights.status === 'skipped' ? (
-                            <div className="p-6 text-center">
+                            <div className="p-6 text-center relative">
+                                <div className="absolute top-4 right-4">
+                                    <button 
+                                        onClick={() => fetchDailyInsights(true)}
+                                        disabled={insightsLoading}
+                                        title="Force Reset Analysis"
+                                        className="text-gray-600 hover:text-white transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    </button>
+                                </div>
                                 <p className="text-gray-400 mb-2">Nothing historic happened today.</p>
                                 <p className="text-sm text-gray-500 mb-6">Intrigue Score: {dailyInsights.score}/100 (Threshold: 70)</p>
                                 
@@ -228,13 +220,33 @@ export default function Home() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="p-6">
-                                <div className="flex justify-between items-start mb-4">
+                            <div className="p-6 relative">
+                                <div className="absolute top-6 right-6 flex gap-3">
+                                     <button 
+                                        onClick={() => fetchDailyInsights(true)}
+                                        disabled={insightsLoading}
+                                        title="Refresh Analysis"
+                                        className="text-gray-500 hover:text-indigo-400 transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${insightsLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <div className="flex justify-between items-start mb-4 pr-10">
                                     <div>
-                                        <h3 className="text-xl font-bold text-white">Daily Market Pulse</h3>
-                                        <p className="text-gray-400 text-sm mt-1">{dailyInsights.data.summary}</p>
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <h3 className="text-xl font-bold text-white">Daily Market Pulse</h3>
+                                            {dailyInsights.data.date && (
+                                                <span className="text-xs font-mono text-gray-400 bg-gray-700/50 px-2 py-1 rounded">
+                                                    {dailyInsights.data.date}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-gray-400 text-sm">{dailyInsights.data.summary}</p>
                                     </div>
-                                    <div className="bg-indigo-900/50 text-indigo-300 px-3 py-1 rounded-full text-sm font-bold border border-indigo-800">
+                                    <div className="bg-indigo-900/50 text-indigo-300 px-3 py-1 rounded-full text-sm font-bold border border-indigo-800 whitespace-nowrap">
                                         Score: {dailyInsights.data.intrigue_score}/100
                                     </div>
                                 </div>

@@ -309,6 +309,10 @@ def run_daily_insight_generation():
     # Get Analysis
     analysis = llm.generate_daily_insights(stats, headlines)
     
+    # Add date to top-level analysis object so frontend can display it
+    if 'date' not in analysis:
+        analysis['date'] = stats['date']
+    
     # --- Validation & Iteration Loop ---
     print(f"Validating {len(analysis.get('questions', []))} questions...")
     validated_questions = []
