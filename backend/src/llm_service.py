@@ -1,4 +1,4 @@
-import google.generativeai as genai
+from google import genai
 import os
 import textwrap
 import json
@@ -9,14 +9,17 @@ class LLMService:
         if not api_key:
             print("Warning: GOOGLE_API_KEY not found in environment variables.")
         else:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.5-pro')
+            self.client = genai.Client(api_key=api_key)
+            self.model_name = 'gemini-3-pro-preview'
 
     def generate_backtest_condition(self, query: str) -> dict:
         """
         Generates a Python function string and extracted periods from a natural language query.
         Returns a dict: {'code': str, 'periods': list[str] or None}
         """
+        if not self.client:
+            return {"code": "", "periods": None}
+
         # Load available data context
         data_context = ""
         try:
@@ -118,7 +121,10 @@ class LLMService:
         """)
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             
             # Clean up any potential markdown formatting if the model ignores the rule
@@ -142,6 +148,8 @@ class LLMService:
         """
         Analyzes the day and returns a JSON with a score and questions.
         """
+        if not self.client:
+            return {"intrigue_score": 0, "error": "LLM client not initialized"}
         
         # Load available data context for the questions generation
         data_context = ""
@@ -204,7 +212,10 @@ class LLMService:
         """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             # Clean up markdown
             text = response.text.strip()
             if text.startswith("```json"):
@@ -222,6 +233,9 @@ class LLMService:
         """
         Generates a single replacement question because the previous one failed validation.
         """
+        if not self.client:
+            return None
+
         # Load available data context
         data_context = ""
         try:
@@ -265,7 +279,10 @@ class LLMService:
         """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             if text.startswith("```json"):
                 text = text[7:]
@@ -282,6 +299,9 @@ class LLMService:
         """
         Generates a brief interpretation of the backtest results.
         """
+        if not self.client:
+            return {"result_explanation": "LLM client not initialized."}
+
         # Extract count correctly from the nested results structure
         count = 0
         if 'results' in results_data and isinstance(results_data['results'], dict):
@@ -319,7 +339,10 @@ class LLMService:
         """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             
             # Clean up markdown code blocks
