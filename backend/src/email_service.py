@@ -15,6 +15,23 @@ from dotenv import load_dotenv
 # Load env vars if not already loaded
 load_dotenv()
 
+GLOSSARY = {
+    "VIX": "The CBOE Volatility Index, often called the 'fear gauge'. It measures expected market volatility over the next 30 days based on S&P 500 options.",
+    "Z-Score": "A statistical measurement that describes a value's relationship to the mean of a group of values. Z-score is measured in terms of standard deviations from the mean.",
+    "Relative Volume": "A ratio comparing current volume to the average volume for the same time of day. Value > 1 indicates higher than normal activity.",
+    "P/E": "Price-to-Earnings Ratio. A valuation ratio of a company's current share price compared to its per-share earnings.",
+    "Yield Curve": "A line that plots yields (interest rates) of bonds having equal credit quality but differing maturity dates. An inverted yield curve (short-term rates > long-term rates) is often seen as a recession predictor.",
+    "TNX": "The CBOE 10-Year Treasury Note Yield Index. It tracks the yield on 10-year US Treasury notes.",
+    "Basis Points": "A unit of measure used in finance to describe the percentage change in the value or rate of a financial instrument. One basis point is equivalent to 0.01% (1/100th of a percent).",
+    "RSI": "Relative Strength Index. A momentum indicator used in technical analysis that measures the magnitude of recent price changes to evaluate overbought or oversold conditions.",
+    "SMA": "Simple Moving Average. An arithmetic moving average calculated by adding recent prices and then dividing that figure by the number of time periods in the calculation.",
+    "Mean Reversion": "A financial theory suggesting that asset prices and historical returns eventually return to the long-run mean or average level of the entire dataset.",
+    "Volatility": "A statistical measure of the dispersion of returns for a given security or market index. High volatility means the price can change dramatically over a short time period.",
+    "Forward Return": "The percentage return of an asset over a future period (e.g., '1M Forward Return' is the return over the next month).",
+    "Win Rate": "The percentage of trades or signals that resulted in a positive return.",
+    "Baseline": "The average performance of the market (S&P 500) over the same time periods, used as a benchmark to compare against the specific signal."
+}
+
 def format_percentage(val):
     if val is None: return "N/A"
     if isinstance(val, str): return val
@@ -265,6 +282,38 @@ def send_daily_email_task():
         html_parts.append("""
             </div>
         </div>
+        """)
+
+    # Glossary Section
+    # Gather all text content to check for terms
+    all_text = (
+        data.get('summary', '') + " " + 
+        " ".join(data.get('top_news', [])) + " " + 
+        " ".join([q.get('question', '') + " " + q.get('insight_explanation', '') + " " + q.get('result_explanation', '') for q in questions])
+    ).lower()
+    
+    used_terms = []
+    for term, definition in GLOSSARY.items():
+        if term.lower() in all_text:
+            used_terms.append((term, definition))
+            
+    if used_terms:
+        html_parts.append("""
+            <div style="padding: 24px; border-top: 1px solid #e5e7eb;">
+                <h3 style="margin: 0 0 16px 0; color: #4b5563; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Glossary of Terms</h3>
+                <div style="font-size: 13px; color: #4b5563;">
+        """)
+        
+        for term, definition in used_terms:
+            html_parts.append(f"""
+                <div style="margin-bottom: 12px;">
+                    <strong style="color: #1f2937;">{term}:</strong> {definition}
+                </div>
+            """)
+            
+        html_parts.append("""
+                </div>
+            </div>
         """)
 
     html_parts.append("""
