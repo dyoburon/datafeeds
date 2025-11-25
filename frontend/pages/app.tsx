@@ -15,6 +15,7 @@ export default function Home() {
     const [saveDescription, setSaveDescription] = useState('');
     const [dailyInsights, setDailyInsights] = useState<any>(null);
     const [insightsLoading, setInsightsLoading] = useState(false);
+    const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set());
 
     useEffect(() => {
         fetchSavedQueries();
@@ -30,6 +31,11 @@ export default function Home() {
             
             const response = await axios.get(url);
             setDailyInsights(response.data);
+            // Expand all questions by default
+            if (response.data?.data?.questions) {
+                const allIndices = new Set<number>(response.data.data.questions.map((_: any, i: number) => i));
+                setExpandedQuestions(allIndices);
+            }
         } catch (err: any) {
             console.error('Failed to fetch insights', err);
             alert('Failed to fetch insights: ' + (err.response?.data?.error || err.message));
@@ -246,20 +252,35 @@ export default function Home() {
 
                                 <div>
                                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Suggested Analysis (with Predictive Score)</h4>
-                                    <div className="grid grid-cols-1 gap-2">
+                                    <div className="grid grid-cols-1 gap-3">
                                         {dailyInsights.data.questions.map((item: any, i: number) => {
                                             // Handle both old format (string) and new format (object)
                                             const questionText = typeof item === 'string' ? item : item.question;
                                             const score = typeof item === 'string' ? null : item.predictive_score;
                                             
-                                            // Check if this specific item is expanded/selected
-                                            const isExpanded = results && results.generated_code === item.code; // Basic check, or use a new state variable 'expandedQuestionIndex'
+                                            // Check if this specific item is expanded using state
+                                            const isExpanded = expandedQuestions.has(i);
+                                            
+                                            // Get cached results from item.results (previously saved as test_result in backend logic, but key is 'results')
+                                            const cachedResults = item.results;
+
+                                            const toggleExpanded = () => {
+                                                setExpandedQuestions(prev => {
+                                                    const next = new Set(prev);
+                                                    if (next.has(i)) {
+                                                        next.delete(i);
+                                                    } else {
+                                                        next.add(i);
+                                                    }
+                                                    return next;
+                                                });
+                                            };
 
                                             return (
                                                 <div key={i} className="flex flex-col bg-gray-800 rounded-lg border border-indigo-900/50 overflow-hidden transition-all">
                                                     <button
-                                                        onClick={() => handleAsk(questionText)}
-                                                        className={`text-left p-3 hover:bg-indigo-900/20 transition-colors flex justify-between items-center group w-full ${isExpanded ? 'bg-indigo-900/30 border-b border-indigo-900/50' : ''}`}
+                                                        onClick={toggleExpanded}
+                                                        className={`text-left p-3 hover:bg-indigo-900/20 transition-colors flex justify-between items-center group w-full ${isExpanded ? 'bg-indigo-900/30' : ''}`}
                                                     >
                                                         <div className="flex items-center gap-3">
                                                             {score !== null && (
@@ -273,73 +294,50 @@ export default function Home() {
                                                             )}
                                                             <span className="text-sm font-medium text-gray-300 group-hover:text-white">{questionText}</span>
                                                         </div>
-                                                        <span className={`text-indigo-400 group-hover:text-indigo-300 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>→</span>
+                                                        <span className={`text-indigo-400 group-hover:text-indigo-300 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                                                     </button>
                                                     
-                                                    {/* Render results directly inside if this is the active question */}
-                                                    {isExpanded && results && !loading && (
-                                                        <div className="p-6 bg-gray-900/50 border-t border-indigo-900/30 animate-fade-in">
+                                                    {/* Render cached results if expanded */}
+                                                    {isExpanded && cachedResults && (
+                                                        <div className="p-4 bg-gray-900/80 border-t border-gray-700">
                                                             {/* Insight Explanation - WHY we're asking this */}
                                                             {item.insight_explanation && (
-                                                                <div className="mb-4 p-4 bg-blue-900/20 border border-blue-800/50 rounded-lg">
-                                                                    <h4 className="text-xs font-bold text-blue-300 uppercase mb-2">💡 Insight</h4>
+                                                                <div className="mb-3 p-3 bg-blue-950/50 border border-blue-800/50 rounded-lg">
+                                                                    <h4 className="text-xs font-bold text-blue-400 uppercase mb-1">💡 Why this question?</h4>
                                                                     <p className="text-sm text-gray-300">{item.insight_explanation}</p>
                                                                 </div>
                                                             )}
                                                             
-                                                            {/* Minimal Results View for Accordion */}
-                                                            <div className="mb-4">
-                                                                <div className="flex items-baseline gap-2 mb-4">
-                                                                    <span className="text-gray-400 text-sm">Occurrences Found:</span>
-                                                                    <span className="text-lg font-bold text-white">{results.count || results.results.count}</span>
-                                                                </div>
-                                                                
-                                                                <div className="h-64 w-full mb-6">
-                                                                    <ResultsCharts 
-                                                                        results={results.results || results} 
-                                                                        control={results.control} 
-                                                                        signals={results.signals || []} 
-                                                                    />
-                                                                </div>
-                                                                
-                                                                {/* Result Explanation - WHAT the results mean */}
-                                                                {item.result_explanation && (
-                                                                    <div className="mb-4 p-4 bg-green-900/20 border border-green-800/50 rounded-lg">
-                                                                        <h4 className="text-xs font-bold text-green-300 uppercase mb-2">📊 Results Interpretation</h4>
-                                                                        <p className="text-sm text-gray-300">{item.result_explanation}</p>
-                                                                    </div>
-                                                                )}
-
-                                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                                                                    {Object.keys(results.results || results).filter(k => k !== 'count' && k !== 'generated_code' && k !== 'control').map((period) => {
-                                                                        const data = (results.results || results)[period];
-                                                                        const controlData = results.control ? results.control[period] : null;
-                                                                        if (!data || data === "Data not available") return null;
-
-                                                                        return (
-                                                                            <div key={period} className="bg-gray-800 rounded p-3 border border-gray-700 text-xs">
-                                                                                <h4 className="font-bold text-gray-400 uppercase mb-2">{period} Later</h4>
-                                                                                <div className="space-y-1">
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Mean:</span>
-                                                                                        <span className={`font-mono font-bold ${data.mean > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                                                                            {(data.mean * 100).toFixed(2)}%
-                                                                                        </span>
-                                                                                    </div>
-                                                                                    {controlData && (
-                                                                                        <div className="flex justify-between">
-                                                                                            <span className="text-gray-500">Baseline:</span>
-                                                                                            <span className="font-mono text-gray-600">
-                                                                                                {(controlData.mean * 100).toFixed(2)}%
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
+                                                            {/* Occurrences count */}
+                                                            <div className="mb-3 flex items-baseline gap-2">
+                                                                <span className="text-gray-500 text-sm">Occurrences Found:</span>
+                                                                <span className="text-xl font-bold text-white">{cachedResults.count || cachedResults.results?.count || 0}</span>
                                                             </div>
+                                                            
+                                                            {/* Chart - using compact mode */}
+                                                            <div className="mb-3">
+                                                                <ResultsCharts 
+                                                                    results={cachedResults.results || cachedResults} 
+                                                                    control={cachedResults.control} 
+                                                                    signals={cachedResults.signals || []} 
+                                                                    compact={true}
+                                                                />
+                                                            </div>
+                                                            
+                                                            {/* Result Explanation - WHAT the results mean */}
+                                                            {item.result_explanation && (
+                                                                <div className="p-3 bg-green-950/50 border border-green-800/50 rounded-lg">
+                                                                    <h4 className="text-xs font-bold text-green-400 uppercase mb-1">📊 Results Interpretation</h4>
+                                                                    <p className="text-sm text-gray-300">{item.result_explanation}</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Show message if expanded but no cached results */}
+                                                    {isExpanded && !cachedResults && (
+                                                        <div className="p-4 bg-gray-900/80 border-t border-gray-700 text-center">
+                                                            <p className="text-gray-400 text-sm">No cached results available. Click "Force Reset Analysis" to regenerate.</p>
                                                         </div>
                                                     )}
                                                 </div>

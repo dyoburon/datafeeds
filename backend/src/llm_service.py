@@ -177,6 +177,7 @@ class LLMService:
            - **RELATIONSHIPS**: Ask about Yield Curve (10Y-2Y), Bond Yields (TNX), Credit Spreads (HYG), Volatility (VIX), and their relationship to the S&P 500.
            - **MONTHLY/WEEKLY CONTEXT**: Prefer questions that look at broader context (e.g. "When the market ends a month down >5% with high volatility").
            - **DATA COMPATIBILITY**: Ensure your questions can actually be answered using the "Available Data" listed above. (e.g. Ask about Bitcoin or Yields or VIX if relevant to the news).
+           - **TIME PERIODS**: Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons. Only use a single short-term period (like 1W or 1M) if the question is specifically about short-term mean reversion. Most questions should analyze at least 3 time horizons.
            - **PREDICTIVE SCORE**: For each question, assign a score (0-100) on how likely this pattern represents a real, tradeable edge vs random noise.
              * High Score (80+): Structurally sound logic (e.g. mean reversion after extreme extensions).
              * Low Score (<50): Likely noise or overfitting.
@@ -189,13 +190,13 @@ class LLMService:
             "top_news": ["..."],
             "questions": [
                 {{
-                    "question": "Forward returns when monthly volatility > 2.0 and monthly return < -5%?",
-                    "insight_explanation": "High volatility combined with a sharp drop often signals panic selling, potentially creating a mean-reversion opportunity.",
+                    "question": "What are the 1M, 3M, and 6M forward returns when monthly volatility > 2.0 and monthly return < -5%?",
+                    "insight_explanation": "High volatility combined with a sharp drop often signals panic selling, potentially creating a mean-reversion opportunity across multiple time horizons.",
                     "predictive_score": 85
                 }},
                 {{
-                    "question": "What happens after a reversal day on >2x volume?",
-                    "insight_explanation": "High volume reversals often indicate a climax in sentiment and can mark a short-term bottom.",
+                    "question": "What are the 1M, 3M, and 1Y forward returns after a reversal day on >2x volume?",
+                    "insight_explanation": "High volume reversals often indicate a climax in sentiment - testing multiple horizons shows if this is a short-term bounce or lasting trend change.",
                     "predictive_score": 78
                 }}
             ]
@@ -246,6 +247,7 @@ class LLMService:
         2. Relevant to today's market context.
         3. Uses available data.
         4. Includes a predictive score and insight explanation.
+        5. **TIME PERIODS**: Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons. Most questions should analyze at least 3 time horizons.
         
         ### Market Data
         - Date: {market_stats['date']}
@@ -256,7 +258,7 @@ class LLMService:
 
         ### Output Format (JSON ONLY)
         {{
-            "question": "New valid question...",
+            "question": "What are the 1M, 3M, and 6M forward returns when [condition]?",
             "insight_explanation": "Why this question matters...",
             "predictive_score": 80
         }}
@@ -280,6 +282,13 @@ class LLMService:
         """
         Generates a brief interpretation of the backtest results.
         """
+        # Extract count correctly from the nested results structure
+        count = 0
+        if 'results' in results_data and isinstance(results_data['results'], dict):
+            count = results_data['results'].get('count', 0)
+        elif 'count' in results_data:
+            count = results_data['count']
+            
         prompt = f"""
         You are a Senior Quantitative Analyst. Interpret these backtest results for a user.
         
@@ -287,7 +296,7 @@ class LLMService:
         "{question}"
         
         ### Backtest Results
-        Occurrences: {results_data.get('count', 0)}
+        Occurrences: {count}
         
         Stats (Signal vs Baseline):
         {json.dumps(results_data.get('results', {}), indent=2)}
@@ -311,13 +320,25 @@ class LLMService:
         try:
             response = self.model.generate_content(prompt)
             text = response.text.strip()
+            
+            # Clean up markdown code blocks
             if text.startswith("```json"):
                 text = text[7:]
-            if text.startswith("```"):
+            elif text.startswith("```"):
                 text = text[3:]
             if text.endswith("```"):
                 text = text[:-3]
-            return json.loads(text.strip())
+            
+            text = text.strip()
+            
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                # Fallback: if not valid JSON, treat the whole text as the explanation
+                # Remove any JSON-like brackets if they exist but are malformed
+                clean_text = text.replace('{', '').replace('}', '').replace('"result_explanation":', '').strip().strip('"')
+                return {"result_explanation": clean_text}
+                
         except Exception as e:
             print(f"LLM Result Interpretation Error: {e}")
             return {"result_explanation": "Unable to interpret results."}
