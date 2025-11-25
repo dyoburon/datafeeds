@@ -711,6 +711,32 @@ export default function Home() {
                      </div>
                 )}
             </div>
+
+            {/* Debug Tools Footer */}
+            <div className="max-w-4xl mx-auto mt-12 mb-8 border-t border-gray-800 pt-8 pb-8">
+                <h3 className="text-xs font-bold text-gray-600 uppercase mb-4">Debug Tools</h3>
+                <div className="flex gap-4">
+                    <button
+                        onClick={async () => {
+                            if (confirm('Send daily market analysis email now?')) {
+                                try {
+                                    await axios.post('http://localhost:5001/api/email/test');
+                                    alert('Email sent successfully! Check your inbox.');
+                                } catch (err: any) {
+                                    alert('Failed to send email: ' + (err.response?.data?.error || err.message));
+                                }
+                            }
+                        }}
+                        className="px-4 py-2 bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white text-xs rounded border border-gray-700 transition-all flex items-center gap-2"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                            <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+                        </svg>
+                        Test Email Send
+                    </button>
+                </div>
+            </div>
         </div>
     )
 }

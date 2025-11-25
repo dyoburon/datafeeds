@@ -13,6 +13,7 @@ from src.services import (run_november_scenario, run_friday_scenario, run_pe_sce
                           run_pe_16_17, run_pe_17_18, run_pe_18_19, run_pe_19_20, 
                           run_pe_20_21, run_pe_21_22, run_pe_22_23,
                           save_custom_query, get_saved_queries, run_saved_query, run_daily_insight_generation)
+from src.email_service import send_daily_email_task
 from flask import request
 
 app = Flask(__name__)
@@ -29,6 +30,8 @@ def scheduled_analysis_task():
 scheduler = BackgroundScheduler()
 # Run immediately on startup (optional, but good for testing) and then every hour
 scheduler.add_job(func=scheduled_analysis_task, trigger="interval", minutes=60)
+# Run daily email at 3:00 PM
+scheduler.add_job(func=send_daily_email_task, trigger="cron", hour=15, minute=0)
 scheduler.start()
 
 # Shut down the scheduler when exiting the app
@@ -218,6 +221,16 @@ def run_saved_query_endpoint(query_id):
             status_code = 404 if results["error"] == "Query not found" else 400
             return jsonify(results), status_code
         return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/email/test', methods=['POST'])
+def test_email():
+    try:
+        result = send_daily_email_task()
+        if result and "error" in result:
+            return jsonify(result), 500
+        return jsonify({"status": "success", "message": "Email sent (check server logs for details)"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
