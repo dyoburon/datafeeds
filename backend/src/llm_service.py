@@ -10,7 +10,7 @@ class LLMService:
             print("Warning: GOOGLE_API_KEY not found in environment variables.")
         else:
             self.client = genai.Client(api_key=api_key)
-            self.model_name = 'gemini-3-pro-preview'
+            self.model_name = 'gemini-2.5-pro'
 
     def generate_backtest_condition(self, query: str) -> dict:
         """
@@ -120,6 +120,14 @@ class LLMService:
             ### Generated JSON
         """)
         
+        # --- LOGGING START ---
+        print("\n" + "="*60)
+        print(f"🚀 [generate_backtest_condition] Sending to {self.model_name}:")
+        print("-" * 20)
+        print(prompt)
+        print("="*60 + "\n")
+        # --- LOGGING END ---
+
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -185,7 +193,10 @@ class LLMService:
            - **RELATIONSHIPS**: Ask about Yield Curve (10Y-2Y), Bond Yields (TNX), Credit Spreads (HYG), Volatility (VIX), and their relationship to the S&P 500.
            - **MONTHLY/WEEKLY CONTEXT**: Prefer questions that look at broader context (e.g. "When the market ends a month down >5% with high volatility").
            - **DATA COMPATIBILITY**: Ensure your questions can actually be answered using the "Available Data" listed above. (e.g. Ask about Bitcoin or Yields or VIX if relevant to the news).
-           - **TIME PERIODS**: Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons. Only use a single short-term period (like 1W or 1M) if the question is specifically about short-term mean reversion. Most questions should analyze at least 3 time horizons.
+           - **TIME PERIODS**: 
+             * Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons.
+             * **ADAPTIVE HORIZONS**: If the question is short-term (e.g. "reversal day"), include at least one medium-term period (1Y) to check for lasting impact. If the question is long-term (e.g. "high P/E"), include long horizons (3Y, 5Y, 10Y).
+             * Do NOT default to "1M, 3M, 6M" blindly. Choose horizons that match the hypothesis.
            - **PREDICTIVE SCORE**: For each question, assign a score (0-100) on how likely this pattern represents a real, tradeable edge vs random noise.
              * High Score (80+): Structurally sound logic (e.g. mean reversion after extreme extensions).
              * Low Score (<50): Likely noise or overfitting.
@@ -211,6 +222,14 @@ class LLMService:
         }}
         """
         
+        # --- LOGGING START ---
+        print("\n" + "="*60)
+        print(f"🚀 [generate_daily_insights] Sending to {self.model_name}:")
+        print("-" * 20)
+        print(prompt)
+        print("="*60 + "\n")
+        # --- LOGGING END ---
+
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -261,7 +280,10 @@ class LLMService:
         2. Relevant to today's market context.
         3. Uses available data.
         4. Includes a predictive score and insight explanation.
-        5. **TIME PERIODS**: Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons. Most questions should analyze at least 3 time horizons.
+        5. **TIME PERIODS**: 
+           * Prefer asking for MULTIPLE forward return periods (e.g. "1M, 3M, 6M forward returns") to see how the signal performs across different horizons.
+           * **ADAPTIVE HORIZONS**: If the question is short-term (e.g. "reversal day"), include at least one medium-term period (1Y) to check for lasting impact. If the question is long-term (e.g. "high P/E"), include long horizons (3Y, 5Y, 10Y).
+           * Do NOT default to "1M, 3M, 6M" blindly. Choose horizons that match the hypothesis.
         
         ### Market Data
         - Date: {market_stats['date']}
@@ -278,6 +300,14 @@ class LLMService:
         }}
         """
         
+        # --- LOGGING START ---
+        print("\n" + "="*60)
+        print(f"🚀 [generate_replacement_question] Sending to {self.model_name}:")
+        print("-" * 20)
+        print(prompt)
+        print("="*60 + "\n")
+        # --- LOGGING END ---
+
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -338,6 +368,14 @@ class LLMService:
         }}
         """
         
+        # --- LOGGING START ---
+        print("\n" + "="*60)
+        print(f"🚀 [generate_result_interpretation] Sending to {self.model_name}:")
+        print("-" * 20)
+        print(prompt)
+        print("="*60 + "\n")
+        # --- LOGGING END ---
+
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
