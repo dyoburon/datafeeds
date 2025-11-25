@@ -310,6 +310,7 @@ class LLMService:
         - Is the win rate significantly better?
         - Is there a specific time horizon (e.g. 1M vs 1Y) where it works best?
         - Be objective. If the results are mixed or negative, say so.
+        - If the number of occurrences is low (e.g. < 10), mention that the sample size is small and results should be viewed with caution.
         
         ### Output Format (JSON ONLY)
         {{

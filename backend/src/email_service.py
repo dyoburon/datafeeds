@@ -186,6 +186,8 @@ def send_daily_email_task():
              control_data = q['results'].get('control', {})
              has_results = True
         
+        count = stats_data.get('count', 0)
+        
         # Generate Chart
         chart_cid = f"chart_{i}"
         chart_img_data = None
@@ -201,6 +203,7 @@ def send_daily_email_task():
         <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 24px; overflow: hidden;">
             <div style="background-color: #f8fafc; padding: 16px; border-bottom: 1px solid #e5e7eb;">
                 <h4 style="margin: 0; color: #1e40af; font-size: 16px;">{q_text}</h4>
+                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Based on {count} historical occurrences</div>
             </div>
             
             <div style="padding: 16px;">
