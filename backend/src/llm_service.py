@@ -1,6 +1,7 @@
 import google.generativeai as genai
 import os
 import textwrap
+import json
 
 class LLMService:
     def __init__(self):
@@ -141,7 +142,6 @@ class LLMService:
         """
         Analyzes the day and returns a JSON with a score and questions.
         """
-        import json
         
         # Load available data context for the questions generation
         data_context = ""
@@ -173,11 +173,14 @@ class LLMService:
         2. Rate the "Intrigue Level" (0-100) of today.
         3. Generate 3 backtesting questions.
            - **ANTI-OVERFITTING RULE**: Avoid hyper-specific conditions (e.g. "exact price is $400.01"). 
+           - **FUNDAMENTAL FOCUS**: Avoid pure technical analysis like "200-day Moving Average" or "Golden Cross". Focus on Macro, Fundamentals, and Inter-market relationships.
+           - **RELATIONSHIPS**: Ask about Yield Curve (10Y-2Y), Bond Yields (TNX), Credit Spreads (HYG), Volatility (VIX), and their relationship to the S&P 500.
            - **MONTHLY/WEEKLY CONTEXT**: Prefer questions that look at broader context (e.g. "When the market ends a month down >5% with high volatility").
            - **DATA COMPATIBILITY**: Ensure your questions can actually be answered using the "Available Data" listed above. (e.g. Ask about Bitcoin or Yields or VIX if relevant to the news).
            - **PREDICTIVE SCORE**: For each question, assign a score (0-100) on how likely this pattern represents a real, tradeable edge vs random noise.
              * High Score (80+): Structurally sound logic (e.g. mean reversion after extreme extensions).
              * Low Score (<50): Likely noise or overfitting.
+           - **INSIGHT EXPLANATION**: Provide a 1-sentence explanation of WHY this question is interesting (the hypothesis).
 
         ### Output Format (JSON ONLY)
         {{
@@ -187,10 +190,12 @@ class LLMService:
             "questions": [
                 {{
                     "question": "Forward returns when monthly volatility > 2.0 and monthly return < -5%?",
+                    "insight_explanation": "High volatility combined with a sharp drop often signals panic selling, potentially creating a mean-reversion opportunity.",
                     "predictive_score": 85
                 }},
                 {{
                     "question": "What happens after a reversal day on >2x volume?",
+                    "insight_explanation": "High volume reversals often indicate a climax in sentiment and can mark a short-term bottom.",
                     "predictive_score": 78
                 }}
             ]
@@ -211,3 +216,108 @@ class LLMService:
         except Exception as e:
             print(f"LLM Insight Error: {e}")
             return {"intrigue_score": 0, "error": str(e)}
+            
+    def generate_replacement_question(self, market_stats, bad_question, reason):
+        """
+        Generates a single replacement question because the previous one failed validation.
+        """
+        # Load available data context
+        data_context = ""
+        try:
+            context_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'available_data.txt')
+            with open(context_path, 'r') as f:
+                data_context = f.read()
+        except Exception:
+            data_context = "Standard OHLCV data + PE ratio available."
+
+        prompt = f"""
+        You are a Senior Quantitative Analyst. 
+        The previous backtesting question you generated was invalid.
+        
+        ### Invalid Question
+        "{bad_question}"
+        
+        ### Reason for Failure
+        {reason}
+        
+        ### Task
+        Generate ONE replacement backtesting question that is:
+        1. Valid (actually has occurrences in history).
+        2. Relevant to today's market context.
+        3. Uses available data.
+        4. Includes a predictive score and insight explanation.
+        
+        ### Market Data
+        - Date: {market_stats['date']}
+        - Return: {market_stats['return_pct']}%
+        
+        ### Available Data
+        {data_context}
+
+        ### Output Format (JSON ONLY)
+        {{
+            "question": "New valid question...",
+            "insight_explanation": "Why this question matters...",
+            "predictive_score": 80
+        }}
+        """
+        
+        try:
+            response = self.model.generate_content(prompt)
+            text = response.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip())
+        except Exception as e:
+            print(f"LLM Replacement Error: {e}")
+            return None
+
+    def generate_result_interpretation(self, question, results_data):
+        """
+        Generates a brief interpretation of the backtest results.
+        """
+        prompt = f"""
+        You are a Senior Quantitative Analyst. Interpret these backtest results for a user.
+        
+        ### Question
+        "{question}"
+        
+        ### Backtest Results
+        Occurrences: {results_data.get('count', 0)}
+        
+        Stats (Signal vs Baseline):
+        {json.dumps(results_data.get('results', {}), indent=2)}
+        
+        Control/Baseline Stats:
+        {json.dumps(results_data.get('control', {}), indent=2)}
+        
+        ### Task
+        Write a 2-3 sentence interpretation. 
+        - Did the signal outperform the baseline? 
+        - Is the win rate significantly better?
+        - Is there a specific time horizon (e.g. 1M vs 1Y) where it works best?
+        - Be objective. If the results are mixed or negative, say so.
+        
+        ### Output Format (JSON ONLY)
+        {{
+            "result_explanation": "The signal shows a strong short-term edge, outperforming the baseline by 2% over the next month with a 65% win rate. However, this advantage fades over longer timeframes."
+        }}
+        """
+        
+        try:
+            response = self.model.generate_content(prompt)
+            text = response.text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip())
+        except Exception as e:
+            print(f"LLM Result Interpretation Error: {e}")
+            return {"result_explanation": "Unable to interpret results."}

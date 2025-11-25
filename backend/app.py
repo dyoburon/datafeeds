@@ -2,6 +2,9 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
+import json
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 # Load environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -13,6 +16,25 @@ from src.services import (run_november_scenario, run_friday_scenario, run_pe_sce
 from flask import request
 
 app = Flask(__name__)
+
+# --- Background Scheduler Setup ---
+def scheduled_analysis_task():
+    print("Scheduler: Starting scheduled daily analysis task...")
+    try:
+        run_daily_insight_generation()
+        print("Scheduler: Daily analysis task completed.")
+    except Exception as e:
+        print(f"Scheduler: Task failed with error: {e}")
+
+scheduler = BackgroundScheduler()
+# Run immediately on startup (optional, but good for testing) and then every hour
+scheduler.add_job(func=scheduled_analysis_task, trigger="interval", minutes=60)
+scheduler.start()
+
+# Shut down the scheduler when exiting the app
+atexit.register(lambda: scheduler.shutdown())
+# ----------------------------------
+
 # Allow CORS for all domains on all routes starting with /api/*
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
@@ -142,21 +164,39 @@ def save_query_endpoint():
 @app.route('/api/insights/daily', methods=['GET'])
 def get_daily_insights():
     try:
-        # Get Analysis
+        # Check for force_reset flag
+        force_reset = request.args.get('force_reset', 'false').lower() == 'true'
+
+        # CHANGED: Try to read from cache first
+        cache_file = os.path.join(os.path.dirname(__file__), 'data', 'daily_analysis.json')
+        
+        if not force_reset and os.path.exists(cache_file):
+            # You could add logic here to check file modification time 
+            # and re-run if it's too old (e.g. > 24 hours)
+            with open(cache_file, 'r') as f:
+                analysis = json.load(f)
+                return jsonify({
+                    "status": "success",
+                    "data": analysis,
+                    "source": "cache"
+                })
+        
+        # Fallback: Run generation if no cache exists
         analysis = run_daily_insight_generation()
         
         # Filter logic (The "Gatekeeper")
-        if analysis.get('intrigue_score', 0) < 70:
+        if analysis.get('intrigue_score', 0) < 70 and not force_reset:
             return jsonify({
                 "status": "skipped",
                 "message": "Today was not interesting enough (Score < 70)",
                 "score": analysis.get('intrigue_score'),
-                "data": analysis # return data anyway for debug/inspection if needed
+                "data": analysis
             })
             
         return jsonify({
             "status": "success",
-            "data": analysis
+            "data": analysis,
+            "source": "generated"
         })
         
     except Exception as e:

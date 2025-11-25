@@ -309,4 +309,98 @@ def run_daily_insight_generation():
     # Get Analysis
     analysis = llm.generate_daily_insights(stats, headlines)
     
+    # --- Validation & Iteration Loop ---
+    print(f"Validating {len(analysis.get('questions', []))} questions...")
+    validated_questions = []
+    
+    for q_idx, q_obj in enumerate(analysis.get('questions', [])):
+        current_question_text = q_obj['question']
+        is_valid = False
+        attempts = 0
+        max_attempts = 3
+        
+        while not is_valid and attempts < max_attempts:
+            print(f"  Processing Q{q_idx+1} (Attempt {attempts+1}): {current_question_text}")
+            
+            # 1. Generate Code for the current question text
+            llm_gen_result = llm.generate_backtest_condition(current_question_text)
+            
+            if not llm_gen_result or not llm_gen_result.get('code'):
+                print("    -> Failed to generate code.")
+                attempts += 1
+                continue
+                
+            code = llm_gen_result['code']
+            periods = llm_gen_result.get('periods')
+            
+            # 2. Dry Run / Execution
+            # We act as if we are running it to see if it works
+            test_result = _execute_code(code, bt, custom_periods=periods)
+            
+            # 3. Check for Errors, Zero Results, or Missing Data
+            if "error" in test_result:
+                failure_reason = f"Code execution error: {test_result['error']}"
+            elif test_result.get('results', {}).get('count', 0) == 0:
+                failure_reason = "Zero occurrences found in history"
+            else:
+                # NEW CHECK: Check if the requested periods actually returned data
+                data_missing = False
+                missing_periods = []
+                results_dict = test_result.get('results', {})
+                
+                for p_key, p_val in results_dict.items():
+                    if p_key != 'count' and p_val == "Data not available":
+                        data_missing = True
+                        missing_periods.append(p_key)
+                
+                if data_missing:
+                    failure_reason = f"Data not available for periods: {', '.join(missing_periods)} (likely too recent or missing auxiliary data)"
+                else:
+                    # Success!
+                    print("    -> Valid!")
+                    q_obj['question'] = current_question_text # Update in case it changed
+                    q_obj['code'] = code # Save code so frontend doesn't need to regenerate
+                    q_obj['periods'] = periods
+                    q_obj['results'] = test_result # Save full execution results (charts, stats)
+                    
+                    # NEW: Generate result interpretation
+                    print("    -> Generating result interpretation...")
+                    interpretation_result = llm.generate_result_interpretation(current_question_text, test_result)
+                    q_obj['result_explanation'] = interpretation_result.get('result_explanation', 'Results interpretation unavailable.')
+                    
+                    validated_questions.append(q_obj)
+                    is_valid = True
+                    continue # Break while loop
+            
+            # If we are here, it failed
+            print(f"    -> Failed: {failure_reason}")
+            attempts += 1
+            
+            if attempts < max_attempts:
+                # 4. Ask LLM for a replacement
+                print("    -> Requesting replacement question...")
+                replacement = llm.generate_replacement_question(stats, current_question_text, failure_reason)
+                if replacement and replacement.get('question'):
+                    current_question_text = replacement['question']
+                    # Update score and insight if provided
+                    if 'predictive_score' in replacement:
+                        q_obj['predictive_score'] = replacement['predictive_score']
+                    if 'insight_explanation' in replacement:
+                        q_obj['insight_explanation'] = replacement['insight_explanation']
+                else:
+                    print("    -> Failed to generate replacement.")
+                    break
+
+    # Update analysis with only valid questions
+    analysis['questions'] = validated_questions
+    
+    # Save to local cache file
+    cache_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'daily_analysis.json')
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(analysis, f, indent=2)
+        print(f"Daily analysis saved to {cache_file}")
+    except Exception as e:
+        print(f"Error saving daily analysis: {e}")
+    
     return analysis

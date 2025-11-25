@@ -20,11 +20,15 @@ export default function Home() {
         fetchSavedQueries();
     }, []);
 
-    const fetchDailyInsights = async () => {
+    const fetchDailyInsights = async (forceReset = false) => {
         setInsightsLoading(true);
         setDailyInsights(null);
         try {
-            const response = await axios.get('http://localhost:5001/api/insights/daily');
+            const url = forceReset 
+                ? 'http://localhost:5001/api/insights/daily?force_reset=true' 
+                : 'http://localhost:5001/api/insights/daily';
+            
+            const response = await axios.get(url);
             setDailyInsights(response.data);
         } catch (err: any) {
             console.error('Failed to fetch insights', err);
@@ -118,6 +122,27 @@ export default function Home() {
         // update the UI input if we used an override
         if (overrideQuery) setQuery(overrideQuery);
 
+        // Check if this query matches a question in the daily insights
+        if (dailyInsights && dailyInsights.data && dailyInsights.data.questions) {
+            const matchedQuestion = dailyInsights.data.questions.find((q: any) => 
+                (typeof q === 'string' && q === queryToUse) || 
+                (typeof q === 'object' && q.question === queryToUse)
+            );
+
+            if (matchedQuestion) {
+                // If found in insights, use the stored results if available
+                if (typeof matchedQuestion === 'object' && matchedQuestion.results) {
+                    console.log("Found cached results for question:", queryToUse);
+                    setResults({
+                        ...matchedQuestion.results,
+                        generated_code: matchedQuestion.code // Ensure code is shown
+                    });
+                    setLoading(false);
+                    return;
+                }
+            }
+        }
+
         try {
             const response = await axios.post('http://localhost:5001/api/backtest/ask', { query: queryToUse });
             setResults(response.data);
@@ -144,22 +169,35 @@ export default function Home() {
 
             {/* Daily Insights Section */}
             <div className="max-w-4xl mx-auto mb-8">
-                <button 
-                    onClick={fetchDailyInsights}
-                    disabled={insightsLoading}
-                    className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 text-white p-4 rounded-xl shadow-lg hover:shadow-2xl transition-all flex items-center justify-center gap-2 font-semibold text-lg border border-indigo-500"
-                >
-                    {insightsLoading ? (
-                        <>
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                            Analyzing Market Data...
-                        </>
-                    ) : (
-                        <>
-                            <span>✨</span> Analyze Today's Market Patterns
-                        </>
-                    )}
-                </button>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => fetchDailyInsights(false)}
+                        disabled={insightsLoading}
+                        className="flex-1 bg-gradient-to-r from-indigo-600 to-blue-600 text-white p-4 rounded-xl shadow-lg hover:shadow-2xl transition-all flex items-center justify-center gap-2 font-semibold text-lg border border-indigo-500"
+                    >
+                        {insightsLoading ? (
+                            <>
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                Analyzing Market Data...
+                            </>
+                        ) : (
+                            <>
+                                <span>✨</span> Analyze Today's Market Patterns
+                            </>
+                        )}
+                    </button>
+                    
+                    <button 
+                        onClick={() => fetchDailyInsights(true)}
+                        disabled={insightsLoading}
+                        title="Force Reset Analysis"
+                        className="bg-gray-800 text-gray-400 p-4 rounded-xl shadow-md hover:bg-gray-700 hover:text-white transition-all border border-gray-700 flex items-center justify-center"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                </div>
 
                 {dailyInsights && (
                     <div className="mt-4 bg-gray-800 rounded-xl shadow-md border border-indigo-900/50 overflow-hidden animate-fade-in">
@@ -214,26 +252,97 @@ export default function Home() {
                                             const questionText = typeof item === 'string' ? item : item.question;
                                             const score = typeof item === 'string' ? null : item.predictive_score;
                                             
+                                            // Check if this specific item is expanded/selected
+                                            const isExpanded = results && results.generated_code === item.code; // Basic check, or use a new state variable 'expandedQuestionIndex'
+
                                             return (
-                                                <button
-                                                    key={i}
-                                                    onClick={() => handleAsk(questionText)}
-                                                    className="text-left p-3 rounded-lg border border-indigo-900/50 hover:bg-indigo-900/20 hover:border-indigo-700 transition-colors flex justify-between items-center group bg-gray-800"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        {score !== null && (
-                                                            <div className={`text-xs font-bold px-2 py-1 rounded-full ${
-                                                                score >= 80 ? 'bg-green-900/30 text-green-400 border border-green-900/50' : 
-                                                                score >= 50 ? 'bg-yellow-900/30 text-yellow-400 border border-yellow-900/50' : 
-                                                                'bg-gray-700 text-gray-400 border border-gray-600'
-                                                            }`}>
-                                                                {score}
+                                                <div key={i} className="flex flex-col bg-gray-800 rounded-lg border border-indigo-900/50 overflow-hidden transition-all">
+                                                    <button
+                                                        onClick={() => handleAsk(questionText)}
+                                                        className={`text-left p-3 hover:bg-indigo-900/20 transition-colors flex justify-between items-center group w-full ${isExpanded ? 'bg-indigo-900/30 border-b border-indigo-900/50' : ''}`}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            {score !== null && (
+                                                                <div className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                                                    score >= 80 ? 'bg-green-900/30 text-green-400 border border-green-900/50' : 
+                                                                    score >= 50 ? 'bg-yellow-900/30 text-yellow-400 border border-yellow-900/50' : 
+                                                                    'bg-gray-700 text-gray-400 border border-gray-600'
+                                                                }`}>
+                                                                    {score}
+                                                                </div>
+                                                            )}
+                                                            <span className="text-sm font-medium text-gray-300 group-hover:text-white">{questionText}</span>
+                                                        </div>
+                                                        <span className={`text-indigo-400 group-hover:text-indigo-300 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>→</span>
+                                                    </button>
+                                                    
+                                                    {/* Render results directly inside if this is the active question */}
+                                                    {isExpanded && results && !loading && (
+                                                        <div className="p-6 bg-gray-900/50 border-t border-indigo-900/30 animate-fade-in">
+                                                            {/* Insight Explanation - WHY we're asking this */}
+                                                            {item.insight_explanation && (
+                                                                <div className="mb-4 p-4 bg-blue-900/20 border border-blue-800/50 rounded-lg">
+                                                                    <h4 className="text-xs font-bold text-blue-300 uppercase mb-2">💡 Insight</h4>
+                                                                    <p className="text-sm text-gray-300">{item.insight_explanation}</p>
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {/* Minimal Results View for Accordion */}
+                                                            <div className="mb-4">
+                                                                <div className="flex items-baseline gap-2 mb-4">
+                                                                    <span className="text-gray-400 text-sm">Occurrences Found:</span>
+                                                                    <span className="text-lg font-bold text-white">{results.count || results.results.count}</span>
+                                                                </div>
+                                                                
+                                                                <div className="h-64 w-full mb-6">
+                                                                    <ResultsCharts 
+                                                                        results={results.results || results} 
+                                                                        control={results.control} 
+                                                                        signals={results.signals || []} 
+                                                                    />
+                                                                </div>
+                                                                
+                                                                {/* Result Explanation - WHAT the results mean */}
+                                                                {item.result_explanation && (
+                                                                    <div className="mb-4 p-4 bg-green-900/20 border border-green-800/50 rounded-lg">
+                                                                        <h4 className="text-xs font-bold text-green-300 uppercase mb-2">📊 Results Interpretation</h4>
+                                                                        <p className="text-sm text-gray-300">{item.result_explanation}</p>
+                                                                    </div>
+                                                                )}
+
+                                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                                                    {Object.keys(results.results || results).filter(k => k !== 'count' && k !== 'generated_code' && k !== 'control').map((period) => {
+                                                                        const data = (results.results || results)[period];
+                                                                        const controlData = results.control ? results.control[period] : null;
+                                                                        if (!data || data === "Data not available") return null;
+
+                                                                        return (
+                                                                            <div key={period} className="bg-gray-800 rounded p-3 border border-gray-700 text-xs">
+                                                                                <h4 className="font-bold text-gray-400 uppercase mb-2">{period} Later</h4>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Mean:</span>
+                                                                                        <span className={`font-mono font-bold ${data.mean > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                                                            {(data.mean * 100).toFixed(2)}%
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    {controlData && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-gray-500">Baseline:</span>
+                                                                                            <span className="font-mono text-gray-600">
+                                                                                                {(controlData.mean * 100).toFixed(2)}%
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
                                                             </div>
-                                                        )}
-                                                        <span className="text-sm font-medium text-gray-300 group-hover:text-white">{questionText}</span>
-                                                    </div>
-                                                    <span className="text-indigo-400 group-hover:text-indigo-300">→</span>
-                                                </button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             );
                                         })}
                                     </div>
@@ -385,7 +494,11 @@ export default function Home() {
                     </div>
                 )}
 
-                {results && !loading && (
+                {/* Only show the main result container if we are NOT in "daily insight" mode (i.e. activeScenario is NOT 'custom' while clicking a daily question) 
+                    Actually, handleAsk sets activeScenario='custom'. We need to differentiate.
+                    Let's change: When clicking a daily question, we set a different activeScenario or flag.
+                */}
+                {results && !loading && activeScenario !== 'custom' && (
                     <div className="bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-700">
                         <h2 className="text-2xl font-bold mb-6 border-b border-gray-700 pb-4 text-white">Results</h2>
 
@@ -525,6 +638,79 @@ export default function Home() {
                             })}
                         </div>
                     </div>
+                )}
+                
+                {/* Only show results for custom questions entered in the input box */}
+                {results && !loading && activeScenario === 'custom' && !dailyInsights?.data?.questions.find((q: any) => (typeof q === 'string' ? q : q.question) === query) && (
+                     <div className="bg-gray-800 rounded-xl shadow-lg p-8 border border-gray-700">
+                        {/* ... same results content as above ... */}
+                        {/* To avoid duplication, we should ideally extract this into a ResultsView component. 
+                            For now, I'll just render it here again for the 'custom' scenario not in daily insights.
+                        */}
+                        <h2 className="text-2xl font-bold mb-6 border-b border-gray-700 pb-4 text-white">Custom Analysis Results</h2>
+                        {/* ... content ... */}
+                        <div className="mb-8">
+                                <div className="bg-gray-950 rounded-lg p-4 overflow-x-auto mb-4 border border-gray-800">
+                                    <p className="text-gray-500 text-xs mb-2 uppercase font-bold">Generated Logic</p>
+                                    <pre className="text-green-400 font-mono text-sm">{results.generated_code}</pre>
+                                </div>
+                                
+                                {!showSaveForm ? (
+                                    <button
+                                        onClick={() => setShowSaveForm(true)}
+                                        className="text-blue-400 hover:text-blue-300 font-semibold text-sm flex items-center gap-2"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                        </svg>
+                                        Save this Query
+                                    </button>
+                                ) : (
+                                    <div className="bg-blue-900/20 p-4 rounded-lg border border-blue-800">
+                                        <h4 className="font-semibold text-blue-300 mb-3">Save Custom Query</h4>
+                                        <div className="flex flex-col gap-3">
+                                            <input
+                                                type="text"
+                                                placeholder="Name (e.g., 'Market Crash Recovery')"
+                                                value={saveName}
+                                                onChange={(e) => setSaveName(e.target.value)}
+                                                className="p-2 border border-gray-600 rounded bg-gray-900 text-white placeholder-gray-500"
+                                            />
+                                            <input
+                                                type="text"
+                                                placeholder="Description (optional)"
+                                                value={saveDescription}
+                                                onChange={(e) => setSaveDescription(e.target.value)}
+                                                className="p-2 border border-gray-600 rounded bg-gray-900 text-white placeholder-gray-500"
+                                            />
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleSave}
+                                                    disabled={!saveName.trim()}
+                                                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                                                >
+                                                    Save
+                                                </button>
+                                                <button
+                                                    onClick={() => setShowSaveForm(false)}
+                                                    className="text-gray-400 hover:text-gray-200 px-4 py-2"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                        <div className="h-96 w-full mb-12">
+                            <ResultsCharts 
+                                results={results.results || results} 
+                                control={results.control} 
+                                signals={results.signals || []} 
+                            />
+                        </div>
+                     </div>
                 )}
             </div>
         </div>

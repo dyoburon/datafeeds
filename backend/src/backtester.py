@@ -40,6 +40,7 @@ class Backtester:
     def analyze(self, condition_mask, periods=['1M', '3M', '6M', '1Y']):
         """
         Analyzes returns for dates where condition_mask is True.
+        Supports dynamic calculation for custom periods (e.g., '5D', '21D').
         """
         subset = self.data[condition_mask]
         results = {}
@@ -49,45 +50,58 @@ class Backtester:
 
         results['count'] = len(subset)
         
+        # Helper to parse period string to days (e.g. "5D" -> 5, "2W" -> 10)
+        def parse_period(p):
+            if p.endswith('D'): return int(p[:-1])
+            if p.endswith('W'): return int(p[:-1]) * 5
+            if p.endswith('M'): return int(p[:-1]) * 21
+            if p.endswith('Y'): return int(p[:-1]) * 252
+            return None
+
         for period in periods:
             col = f'FwdReturn_{period}'
-            if col in subset.columns:
-                vals = subset[col].dropna()
-                if len(vals) > 0:
-                    stats = {
-                        'mean': vals.mean(),
-                        'median': vals.median(),
-                        'std': vals.std(),
-                        'min': vals.min(),
-                        'max': vals.max(),
-                        'win_rate': (vals > 0).mean()
-                    }
-                    
-                    # Calculate CAGR for periods > 1 Year
-                    # We approximate years based on trading days: 252 days/year
-                    # Period string to years map
-                    period_years = {
-                        '3Y': 3,
-                        '5Y': 5,
-                        '10Y': 10
-                    }
-                    
-                    if period in period_years:
-                        years = period_years[period]
-                        # CAGR = (1 + MeanReturn)^(1/n) - 1
-                        # Note: This uses the arithmetic mean of total returns. 
-                        # For a true portfolio CAGR, we'd need the geometric mean of the returns, 
-                        # but for "average outcome of this signal", this is the standard way to present it.
-                        if stats['mean'] > -1: # Avoid complex numbers
-                            stats['cagr'] = (1 + stats['mean'])**(1/years) - 1
-                        else:
-                            stats['cagr'] = None
+            
+            # 1. Check if pre-calculated
+            if col in self.data.columns:
+                vals = self.data.loc[subset.index, col] # Use loc to ensure alignment
+            
+            # 2. If not, calculate on the fly
+            else:
+                days = parse_period(period)
+                if days:
+                    # Calculate specifically for these indices
+                    # We calculate for full DF to ensure correct shifting
+                    temp_series = self.data['Adj Close'].shift(-days) / self.data['Adj Close'] - 1
+                    vals = temp_series.loc[subset.index]
+                else:
+                    results[period] = "Invalid period format"
+                    continue
+
+            # Clean up NaN values (e.g. recent dates where future return is unknown)
+            vals = vals.dropna()
+
+            if len(vals) > 0:
+                stats = {
+                    'mean': vals.mean(),
+                    'median': vals.median(),
+                    'std': vals.std(),
+                    'min': vals.min(),
+                    'max': vals.max(),
+                    'win_rate': (vals > 0).mean()
+                }
+                
+                # Calculate CAGR for periods > 1 Year
+                period_years = {'3Y': 3, '5Y': 5, '10Y': 10}
+                if period in period_years:
+                    years = period_years[period]
+                    if stats['mean'] > -1: # Avoid complex numbers
+                        stats['cagr'] = (1 + stats['mean'])**(1/years) - 1
                     else:
                         stats['cagr'] = None
-                        
-                    results[period] = stats
                 else:
-                    results[period] = None
+                    stats['cagr'] = None
+                    
+                results[period] = stats
             else:
                 results[period] = "Data not available"
                 
@@ -98,20 +112,9 @@ class Backtester:
         """
         Robustly maps a monthly boolean mask (indexed by month-end) to a daily index.
         Returns a daily boolean Series where every day in a marked month is True.
-        
-        Args:
-            monthly_mask (pd.Series): Boolean series with DatetimeIndex (usually monthly freq).
-            daily_index (pd.DatetimeIndex): The target daily index.
-        
-        Returns:
-            pd.Series: Boolean series with daily_index.
         """
         # Convert both to PeriodIndex ('M') to ignore specific timestamps
         monthly_periods = monthly_mask.index.to_period('M')
-        
-        # If monthly_mask has duplicate periods (unlikely if from resample), handle it?
-        # But typically it's unique. We'll assume it's a Series.
-        # We need to create a mapper: Period('2023-01') -> True/False
         
         # Ensure it is a Series indexed by Period
         period_mask = monthly_mask.copy()
@@ -132,11 +135,34 @@ class Backtester:
     def get_signals(self, condition_mask, periods=['1M']):
         """
         Returns a dataframe with the signal dates and their forward returns.
-        Useful for verification.
+        Dynamically calculates columns if missing.
         """
         subset = self.data[condition_mask].copy()
-        cols = ['Adj Close'] + [f'FwdReturn_{p}' for p in periods if f'FwdReturn_{p}' in subset.columns]
-        return subset[cols]
+        
+        # Helper to parse period string to days (e.g. "5D" -> 5, "2W" -> 10)
+        def parse_period(p):
+            if p.endswith('D'): return int(p[:-1])
+            if p.endswith('W'): return int(p[:-1]) * 5
+            if p.endswith('M'): return int(p[:-1]) * 21
+            if p.endswith('Y'): return int(p[:-1]) * 252
+            return None
+
+        cols_to_return = ['Adj Close']
+        
+        for p in periods:
+            col_name = f'FwdReturn_{p}'
+            if col_name not in self.data.columns:
+                days = parse_period(p)
+                if days:
+                    self.data[col_name] = self.data['Adj Close'].shift(-days) / self.data['Adj Close'] - 1
+            
+            if col_name in self.data.columns:
+                 # We need to ensure 'subset' has this column
+                 # subset is a copy, so we need to join or assign
+                 subset[col_name] = self.data.loc[subset.index, col_name]
+                 cols_to_return.append(col_name)
+
+        return subset[cols_to_return]
 
     def get_baseline_stats(self, periods=['1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']):
         """

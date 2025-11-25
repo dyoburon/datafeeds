@@ -46,14 +46,31 @@ const ResultsCharts: React.FC<ResultsChartsProps> = ({ results, control, signals
   const scatterPeriod = availablePeriods.find(p => p === '1Y') || availablePeriods[availablePeriods.length - 1];
 
   const scatterData = signals && signals.map((s) => {
+      // Handle nested signal objects (new format) vs flat (old format)
       const val = s[scatterPeriod];
+      
+      // If val is explicitly null/undefined, skip
       if (val === null || val === undefined) return null;
+      
       return {
           date: s.date,
           return: parseFloat((val * 100).toFixed(2)),
           price: s.price
       };
   }).filter(Boolean) || [];
+
+  // GUARD: If no periods are available (e.g. all "Data not available"), show a message instead of empty charts
+  if (availablePeriods.length === 0) {
+      return (
+          <div className="bg-yellow-900/20 p-6 rounded-xl border border-yellow-800 text-center">
+              <h3 className="text-lg font-bold text-yellow-400 mb-2">Not Enough Data</h3>
+              <p className="text-gray-300">
+                  Although {signals ? signals.length : 0} occurrences were found, there wasn't enough forward-looking data to calculate returns for the requested periods. 
+                  This often happens with very recent signals or when data for auxiliary tickers (like HYG) is missing for older dates.
+              </p>
+          </div>
+      );
+  }
 
   return (
     <div className="space-y-12">
@@ -68,11 +85,43 @@ const ResultsCharts: React.FC<ResultsChartsProps> = ({ results, control, signals
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" />
-              <YAxis label={{ value: 'Average Return (%)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }} />
-              <Tooltip formatter={(value: any) => [`${value}%`, 'Return']} cursor={{fill: 'transparent'}} />
-              <Legend />
+              <YAxis 
+                label={{ 
+                  value: 'Average Return (%)', 
+                  angle: -90, 
+                  position: 'insideLeft', 
+                  style: { textAnchor: 'middle' } 
+                }} 
+              />
+              <Tooltip 
+                formatter={(value: any) => [`${value}%`, '']} 
+                contentStyle={{ 
+                  backgroundColor: 'white', 
+                  border: '1px solid #ccc',
+                  borderRadius: '8px',
+                  padding: '8px'
+                }}
+                cursor={{fill: 'rgba(59, 130, 246, 0.1)'}}
+                wrapperStyle={{ zIndex: 1000 }}
+              />
+              <Legend 
+                wrapperStyle={{ paddingTop: '20px' }}
+                content={({ payload }) => (
+                  <div className="flex justify-center gap-6 pt-4">
+                    {payload?.map((entry: any, index: number) => (
+                      <div key={`item-${index}`} className="flex items-center gap-2">
+                        <div 
+                          className="w-4 h-4 rounded" 
+                          style={{ backgroundColor: entry.color }}
+                        />
+                        <span className="text-sm text-gray-700">{entry.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              />
               <Bar name="Signal Strategy" dataKey="Signal" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar name="Market Baseline" dataKey="Baseline" fill="#9ca3af" radius={[4, 4, 0, 0]} />
+              <Bar name="Market Baseline (Buy & Hold)" dataKey="Baseline" fill="#9ca3af" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
