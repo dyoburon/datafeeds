@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import ResultsCharts from '../components/ResultsCharts';
+import PreferencesModal from '../components/PreferencesModal';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Home() {
     const [results, setResults] = useState<any>(null);
@@ -16,11 +18,21 @@ export default function Home() {
     const [dailyInsights, setDailyInsights] = useState<any>(null);
     const [insightsLoading, setInsightsLoading] = useState(false);
     const [expandedQuestions, setExpandedQuestions] = useState<Set<number>>(new Set());
+    const [showPreferences, setShowPreferences] = useState(false);
+    
+    const { user, backendUser, isNewUser, signOut, isDevMode } = useAuth();
 
     useEffect(() => {
         fetchSavedQueries();
         fetchDailyInsights(false);
     }, []);
+    
+    // Show preferences modal for new users
+    useEffect(() => {
+        if (isNewUser) {
+            setShowPreferences(true);
+        }
+    }, [isNewUser]);
 
     const fetchDailyInsights = async (forceReset = false) => {
         setInsightsLoading(true);
@@ -162,7 +174,21 @@ export default function Home() {
 
     return (
         <div className="min-h-screen p-8 font-sans bg-gray-900 text-gray-100">
-            <header className="mb-10 text-center relative">
+            {/* Preferences Modal */}
+            <PreferencesModal 
+                isOpen={showPreferences} 
+                onClose={() => setShowPreferences(false)}
+                isFirstTime={isNewUser}
+            />
+            
+            {/* Dev mode banner */}
+            {isDevMode && (
+                <div className="fixed top-0 left-0 right-0 bg-yellow-900/50 text-yellow-300 text-xs text-center py-1 px-4 z-40">
+                    🛠️ Dev Mode – Using mock authentication
+                </div>
+            )}
+            
+            <header className={`mb-10 text-center relative ${isDevMode ? 'mt-6' : ''}`}>
                 <div className="absolute top-0 left-0">
                     <Link href="/">
                         <a className="text-gray-400 hover:text-gray-200 text-sm font-semibold flex items-center gap-1">
@@ -170,6 +196,38 @@ export default function Home() {
                         </a>
                     </Link>
                 </div>
+                
+                {/* User info and preferences button */}
+                {user && (
+                    <div className="absolute top-0 right-0 flex items-center gap-4">
+                        <button
+                            onClick={() => setShowPreferences(true)}
+                            className="text-gray-400 hover:text-white text-sm flex items-center gap-2 transition-colors"
+                            title="Email Preferences"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Preferences
+                        </button>
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center text-sm font-medium">
+                                {user.displayName?.charAt(0) || user.email?.charAt(0)?.toUpperCase() || '?'}
+                            </div>
+                            <span className="text-gray-400 text-sm hidden md:inline">
+                                {backendUser?.email || user.email}
+                            </span>
+                            <button
+                                onClick={() => signOut()}
+                                className="text-gray-500 hover:text-white text-sm transition-colors"
+                            >
+                                Sign Out
+                            </button>
+                        </div>
+                    </div>
+                )}
+                
                 <h1 className="text-4xl font-bold text-white mb-2">Prism Datafeed</h1>
                 <p className="text-gray-400">Analyze historical S&P 500 trends with one click or ask your own questions.</p>
             </header>
@@ -251,17 +309,20 @@ export default function Home() {
                                     </div>
                                 </div>
 
-                                <div className="mb-4">
-                                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Top Headlines</h4>
-                                    <div className="flex flex-wrap gap-2">
-                                        {dailyInsights.data.top_news.map((news: string, i: number) => (
-                                            <span key={i} className="bg-gray-800 text-gray-300 px-2 py-1 rounded text-xs border border-gray-700">
-                                                {news}
-                                            </span>
-                                        ))}
+                                {dailyInsights.data.top_news && dailyInsights.data.top_news.length > 0 && (
+                                    <div className="mb-4">
+                                        <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Top Headlines</h4>
+                                        <div className="flex flex-wrap gap-2">
+                                            {dailyInsights.data.top_news.map((news: string, i: number) => (
+                                                <span key={i} className="bg-gray-800 text-gray-300 px-2 py-1 rounded text-xs border border-gray-700">
+                                                    {news}
+                                                </span>
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
+                                {dailyInsights.data.questions && dailyInsights.data.questions.length > 0 && (
                                 <div>
                                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Suggested Analysis (with Predictive Score)</h4>
                                     <div className="grid grid-cols-1 gap-3">
@@ -357,6 +418,7 @@ export default function Home() {
                                         })}
                                     </div>
                                 </div>
+                                )}
                             </div>
                         )}
                     </div>

@@ -14,6 +14,11 @@ from src.services import (run_november_scenario, run_friday_scenario, run_pe_sce
                           run_pe_20_21, run_pe_21_22, run_pe_22_23,
                           save_custom_query, get_saved_queries, run_saved_query, run_daily_insight_generation)
 from src.email_service import send_daily_email_task
+from src.user_service import (
+    get_all_users, get_user_by_id, get_user_by_email, create_user, 
+    update_user, delete_user, get_content_types, get_enabled_content_types,
+    add_preference, remove_preference, add_users_bulk, get_or_create_user
+)
 from flask import request
 
 app = Flask(__name__)
@@ -239,6 +244,208 @@ def test_email():
         return jsonify({"status": "success", "message": "Email sent (check server logs for details)"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ============== USER MANAGEMENT ENDPOINTS ==============
+
+@app.route('/api/users', methods=['GET'])
+def list_users():
+    """Get all registered users."""
+    try:
+        users = get_all_users()
+        return jsonify({"users": users, "count": len(users)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users', methods=['POST'])
+def create_user_endpoint():
+    """
+    Create a new user.
+    
+    Body: { "email": "...", "name": "...", "preferences": ["quantitative_analysis", ...] }
+    - email is required
+    - name is optional
+    - preferences is optional (defaults to all enabled content types)
+    """
+    try:
+        data = request.json
+        if not data or 'email' not in data:
+            return jsonify({"error": "Missing 'email' in request body"}), 400
+        
+        result = create_user(
+            email=data['email'],
+            name=data.get('name', ''),
+            preferences=data.get('preferences')
+        )
+        
+        if 'error' in result:
+            return jsonify(result), 400
+        
+        return jsonify(result), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/auth/sync', methods=['POST'])
+def auth_sync_endpoint():
+    """
+    Sync authentication with backend database.
+    
+    Called when a user logs in (dev mode or Firebase).
+    Creates the user if they don't exist, returns existing user if they do.
+    
+    Body: { "email": "...", "name": "..." }
+    """
+    try:
+        data = request.json
+        if not data or 'email' not in data:
+            return jsonify({"error": "Missing 'email' in request body"}), 400
+        
+        result = get_or_create_user(
+            email=data['email'],
+            name=data.get('name', '')
+        )
+        
+        if 'error' in result:
+            return jsonify(result), 400
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/bulk', methods=['POST'])
+def create_users_bulk_endpoint():
+    """
+    Create multiple users at once.
+    
+    Body: { "users": [{ "email": "...", "name": "...", "preferences": [...] }, ...] }
+    """
+    try:
+        data = request.json
+        if not data or 'users' not in data:
+            return jsonify({"error": "Missing 'users' array in request body"}), 400
+        
+        result = add_users_bulk(data['users'])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['GET'])
+def get_user_endpoint(user_id):
+    """Get a specific user by ID."""
+    try:
+        user = get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(user)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/email/<path:email>', methods=['GET'])
+def get_user_by_email_endpoint(email):
+    """Get a specific user by email address."""
+    try:
+        user = get_user_by_email(email)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(user)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['PUT', 'PATCH'])
+def update_user_endpoint(user_id):
+    """
+    Update a user's details.
+    
+    Body: { "name": "...", "preferences": [...], "active": true/false }
+    All fields optional.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No update data provided"}), 400
+        
+        result = update_user(user_id, data)
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>', methods=['DELETE'])
+def delete_user_endpoint(user_id):
+    """Delete a user."""
+    try:
+        result = delete_user(user_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/preferences', methods=['POST'])
+def add_user_preference(user_id):
+    """
+    Add a content type preference to a user.
+    
+    Body: { "content_type": "quantitative_analysis" }
+    """
+    try:
+        data = request.json
+        if not data or 'content_type' not in data:
+            return jsonify({"error": "Missing 'content_type' in request body"}), 400
+        
+        result = add_preference(user_id, data['content_type'])
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/preferences/<content_type>', methods=['DELETE'])
+def remove_user_preference(user_id, content_type):
+    """Remove a content type preference from a user."""
+    try:
+        result = remove_preference(user_id, content_type)
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/content-types', methods=['GET'])
+def list_content_types():
+    """Get all available content types."""
+    try:
+        content_types = get_content_types()
+        enabled = get_enabled_content_types()
+        return jsonify({
+            "content_types": content_types,
+            "enabled_types": enabled
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

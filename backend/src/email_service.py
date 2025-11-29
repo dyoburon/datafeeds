@@ -11,9 +11,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from datetime import datetime
 from dotenv import load_dotenv
+from .user_service import get_users_by_content_type
 
 # Load env vars if not already loaded
 load_dotenv()
+
+# Content type identifier for this email type
+CONTENT_TYPE_ID = "quantitative_analysis"
 
 GLOSSARY = {
     "VIX": "The CBOE Volatility Index, often called the 'fear gauge'. It measures expected market volatility over the next 30 days based on S&P 500 options.",
@@ -126,19 +130,30 @@ def send_daily_email_task():
     # 2. Check Config
     sender_email = os.environ.get("EMAIL_USER")
     sender_password = os.environ.get("EMAIL_PASSWORD")
-    recipient_email = os.environ.get("EMAIL_RECIPIENT")
     smtp_server = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
     smtp_port = int(os.environ.get("SMTP_PORT", 587))
 
-    if not sender_email or not sender_password or not recipient_email:
-        print("Email Service: Missing credentials (EMAIL_USER, EMAIL_PASSWORD, or EMAIL_RECIPIENT).")
+    if not sender_email or not sender_password:
+        print("Email Service: Missing credentials (EMAIL_USER or EMAIL_PASSWORD).")
         return
 
-    # Handle multiple recipients
-    recipients = [r.strip() for r in recipient_email.split(',') if r.strip()]
+    # Get recipients from user preferences
+    subscribed_users = get_users_by_content_type(CONTENT_TYPE_ID)
+    
+    # Fallback: Also check legacy EMAIL_RECIPIENT env var for backwards compatibility
+    legacy_recipients = os.environ.get("EMAIL_RECIPIENT", "")
+    legacy_emails = [r.strip() for r in legacy_recipients.split(',') if r.strip()]
+    
+    # Combine user service emails with legacy emails (dedup)
+    all_emails = set(u['email'] for u in subscribed_users)
+    all_emails.update(legacy_emails)
+    recipients = list(all_emails)
+    
     if not recipients:
-        print("Email Service: No valid recipients found.")
+        print("Email Service: No valid recipients found. Add users via the API or set EMAIL_RECIPIENT env var.")
         return
+    
+    print(f"Email Service: Found {len(recipients)} recipients for content type '{CONTENT_TYPE_ID}'")
 
     # 3. Prepare Email Content
     date_str = datetime.now().strftime("%B %d, %Y")
