@@ -756,7 +756,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <Head>
-        <title>Your Profile | Prism</title>
+        <title>Profile | Prism</title>
         <meta name="description" content="Configure your investment profile and portfolio" />
       </Head>
 
@@ -787,7 +787,7 @@ export default function ProfilePage() {
               </Link>
               <Link href="/profile">
                 <a className="text-white font-medium text-sm border-b-2 border-emerald-500 pb-1">
-                  Your Profile
+                  Profile
                 </a>
               </Link>
             </div>

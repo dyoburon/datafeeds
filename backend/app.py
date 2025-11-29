@@ -20,10 +20,16 @@ from src.user_service import (
     add_preference, remove_preference, add_users_bulk, get_or_create_user,
     get_watchlist, update_watchlist, add_to_watchlist, remove_from_watchlist,
     get_user_context, update_user_context, get_user_holdings, add_holding,
-    update_holding, delete_holding, replace_all_holdings, get_full_user_profile
+    update_holding, delete_holding, replace_all_holdings, get_full_user_profile,
+    check_profile_completeness, get_cached_analysis, save_cached_analysis, 
+    should_regenerate_analysis
 )
 from src.watchlist_service import get_watchlist_for_email, get_ticker_data, calculate_portfolio_max_drawdown
+from src.llm_service import LLMService
 from flask import request
+
+# Initialize LLM service for portfolio analysis
+llm_service = LLMService()
 
 app = Flask(__name__)
 
@@ -765,6 +771,256 @@ def get_full_profile_endpoint(user_id):
         
         return jsonify(result)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== AI PORTFOLIO ANALYSIS ENDPOINTS ==============
+
+@app.route('/api/users/<user_id>/profile-completeness', methods=['GET'])
+def get_profile_completeness_endpoint(user_id):
+    """
+    Check if user has completed all required profile sections for AI analysis.
+    
+    Required sections:
+    1. Investment Philosophy & Goals
+    2. Knowledge Assessment (at least 4 categories)
+    3. Current Portfolio (at least 1 holding)
+    """
+    try:
+        result = check_profile_completeness(user_id)
+        
+        if 'error' in result and result.get('error') == "User not found":
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/portfolio-analysis', methods=['GET'])
+def get_portfolio_analysis_endpoint(user_id):
+    """
+    Get AI-powered portfolio analysis with intelligent caching.
+    
+    This endpoint:
+    1. Checks if user profile is complete (returns error if not)
+    2. Returns cached analysis if profile hasn't changed
+    3. Regenerates analysis if profile changed and cooldown (5 min) passed
+    4. Returns cached analysis with 'stale' flag if in cooldown
+    
+    Query params:
+        force_refresh: 'true' to force regeneration (ignores cooldown)
+    
+    Returns: AI-generated analysis with:
+        - Overall assessment
+        - Portfolio themes  
+        - Allocation recommendations (with Kelly sizing)
+        - New investment ideas based on secular trends
+        - Macro considerations
+        - Key risks and mitigations
+    """
+    try:
+        # Check profile completeness first
+        completeness = check_profile_completeness(user_id)
+        
+        if 'error' in completeness:
+            return jsonify(completeness), 404
+        
+        if not completeness.get('is_complete'):
+            return jsonify({
+                "status": "incomplete_profile",
+                "message": "Please complete your profile before generating analysis",
+                "completeness": completeness
+            }), 400
+        
+        # Check if we should regenerate
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+        regen_check = should_regenerate_analysis(user_id, cooldown_minutes=5)
+        
+        # Return cached if available and no regeneration needed
+        if not force_refresh and not regen_check.get('should_regenerate'):
+            cached = regen_check.get('cached_analysis', {})
+            return jsonify({
+                "status": "success",
+                "source": "cache",
+                "analysis": cached.get('analysis'),
+                "generated_at": cached.get('generated_at'),
+                "profile_changed": regen_check.get('profile_changed', False),
+                "cooldown_remaining_minutes": regen_check.get('cooldown_remaining_minutes'),
+                "user_id": user_id
+            })
+        
+        # Need to regenerate - get user profile
+        user_profile_data = get_full_user_profile(user_id)
+        
+        if 'error' in user_profile_data:
+            return jsonify(user_profile_data), 404
+        
+        user_context = user_profile_data.get('context', {})
+        holdings = user_profile_data.get('holdings', [])
+        
+        # Build portfolio data
+        portfolio_data = {
+            'holdings': holdings,
+            'total_value': 0,
+            'portfolio_beta': 1.0,
+            'sector_allocation': {},
+            'equities_percent': 100,
+            'bonds_percent': 0,
+            'cash_percent': 0
+        }
+        
+        # Get today's market analysis from cache
+        market_analysis = None
+        cache_file = os.path.join(os.path.dirname(__file__), 'data', 'daily_analysis.json')
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    market_analysis = json.load(f)
+            except Exception as e:
+                print(f"Could not load market analysis: {e}")
+        
+        # Load secular trends
+        secular_trends = ""
+        trends_file = os.path.join(os.path.dirname(__file__), 'secular_trends.txt')
+        if os.path.exists(trends_file):
+            try:
+                with open(trends_file, 'r') as f:
+                    secular_trends = f.read()
+            except Exception as e:
+                print(f"Could not load secular trends: {e}")
+        
+        # Generate AI analysis
+        analysis = llm_service.generate_portfolio_analysis(
+            user_profile=user_context,
+            portfolio_data=portfolio_data,
+            market_analysis=market_analysis,
+            secular_trends=secular_trends
+        )
+        
+        if 'error' in analysis:
+            # Return cached if available, even on error
+            cached = regen_check.get('cached_analysis')
+            if cached and cached.get('analysis'):
+                return jsonify({
+                    "status": "success",
+                    "source": "cache_fallback",
+                    "analysis": cached.get('analysis'),
+                    "generated_at": cached.get('generated_at'),
+                    "generation_error": analysis.get('error'),
+                    "user_id": user_id
+                })
+            return jsonify(analysis), 500
+        
+        # Save to cache
+        save_cached_analysis(user_id, analysis)
+        
+        return jsonify({
+            "status": "success",
+            "source": "generated",
+            "analysis": analysis,
+            "generated_at": analysis.get('generated_at'),
+            "user_id": user_id,
+            "holdings_count": len(holdings)
+        })
+        
+    except Exception as e:
+        print(f"Portfolio analysis error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/portfolio-analysis', methods=['POST'])
+def update_portfolio_analysis_endpoint(user_id):
+    """
+    Force regenerate portfolio analysis with additional portfolio data.
+    
+    Body (optional): {
+        "portfolio_data": {
+            "total_value": 100000,
+            "holdings": [...],
+            "sector_allocation": {...},
+            "portfolio_beta": 1.2,
+            "equities_percent": 80,
+            "bonds_percent": 10,
+            "cash_percent": 10
+        }
+    }
+    """
+    try:
+        # Check profile completeness
+        completeness = check_profile_completeness(user_id)
+        
+        if 'error' in completeness:
+            return jsonify(completeness), 404
+        
+        if not completeness.get('is_complete'):
+            return jsonify({
+                "status": "incomplete_profile",
+                "message": "Please complete your profile before generating analysis",
+                "completeness": completeness
+            }), 400
+        
+        # Get user profile
+        user_profile_data = get_full_user_profile(user_id)
+        
+        if 'error' in user_profile_data:
+            return jsonify(user_profile_data), 404
+        
+        user_context = user_profile_data.get('context', {})
+        holdings = user_profile_data.get('holdings', [])
+        
+        # Get portfolio data from request body or use defaults
+        request_data = request.json or {}
+        portfolio_data = request_data.get('portfolio_data', {})
+        
+        if not portfolio_data.get('holdings'):
+            portfolio_data['holdings'] = holdings
+        
+        # Get today's market analysis
+        market_analysis = None
+        cache_file = os.path.join(os.path.dirname(__file__), 'data', 'daily_analysis.json')
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    market_analysis = json.load(f)
+            except Exception as e:
+                print(f"Could not load market analysis: {e}")
+        
+        # Load secular trends
+        secular_trends = ""
+        trends_file = os.path.join(os.path.dirname(__file__), 'secular_trends.txt')
+        if os.path.exists(trends_file):
+            try:
+                with open(trends_file, 'r') as f:
+                    secular_trends = f.read()
+            except Exception as e:
+                print(f"Could not load secular trends: {e}")
+        
+        # Generate AI analysis
+        analysis = llm_service.generate_portfolio_analysis(
+            user_profile=user_context,
+            portfolio_data=portfolio_data,
+            market_analysis=market_analysis,
+            secular_trends=secular_trends
+        )
+        
+        if 'error' in analysis:
+            return jsonify(analysis), 500
+        
+        # Save to cache
+        save_cached_analysis(user_id, analysis)
+        
+        return jsonify({
+            "status": "success",
+            "source": "generated",
+            "analysis": analysis,
+            "generated_at": analysis.get('generated_at'),
+            "user_id": user_id,
+            "holdings_count": len(holdings)
+        })
+        
+    except Exception as e:
+        print(f"Portfolio analysis error: {e}")
         return jsonify({"error": str(e)}), 500
 
 

@@ -143,6 +143,17 @@ def _init_db():
             CREATE INDEX IF NOT EXISTS idx_holdings_user ON user_holdings(user_id)
         ''')
         
+        # Cached AI analysis table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_ai_analysis (
+                user_id TEXT PRIMARY KEY,
+                analysis_json TEXT DEFAULT '{}',
+                generated_at TEXT NOT NULL,
+                profile_hash TEXT DEFAULT '',
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
         conn.commit()
 
 
@@ -1112,4 +1123,248 @@ def get_full_user_profile(user_id: str) -> Dict:
         "context": context if 'error' not in context else {},
         "holdings": holdings.get('holdings', []) if 'error' not in holdings else [],
         "holdings_count": holdings.get('count', 0) if 'error' not in holdings else 0
+    }
+
+
+# ============== PROFILE COMPLETENESS & AI ANALYSIS CACHING ==============
+
+def check_profile_completeness(user_id: str) -> Dict:
+    """
+    Check if user has completed all required profile sections.
+    
+    Required sections:
+    1. Investment Philosophy & Goals (investment_philosophy, goals, risk_tolerance)
+    2. Knowledge Assessment (at least 4 categories rated)
+    3. Current Portfolio (at least 1 holding)
+    
+    Returns:
+        Dict with is_complete, missing_sections, and completion_percentage
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found", "is_complete": False}
+    
+    context = get_user_context(user_id)
+    holdings = get_user_holdings(user_id)
+    
+    missing_sections = []
+    completed_items = 0
+    total_items = 3
+    
+    # Check Philosophy & Goals
+    philosophy_complete = bool(
+        context.get('investment_philosophy', '').strip() and
+        context.get('goals', '').strip()
+    )
+    if philosophy_complete:
+        completed_items += 1
+    else:
+        missing_sections.append({
+            "section": "philosophy_goals",
+            "name": "Investment Philosophy & Goals",
+            "message": "Please fill out your investment philosophy and goals"
+        })
+    
+    # Check Knowledge Assessment (at least 4 categories rated > 0)
+    knowledge = context.get('knowledge_assessment', {})
+    rated_categories = sum(1 for v in knowledge.values() if v > 0)
+    knowledge_complete = rated_categories >= 4
+    if knowledge_complete:
+        completed_items += 1
+    else:
+        missing_sections.append({
+            "section": "knowledge",
+            "name": "Knowledge Assessment",
+            "message": f"Please rate at least 4 knowledge categories ({rated_categories}/4 completed)"
+        })
+    
+    # Check Current Portfolio (at least 1 holding)
+    holdings_list = holdings.get('holdings', []) if 'error' not in holdings else []
+    portfolio_complete = len(holdings_list) >= 1
+    if portfolio_complete:
+        completed_items += 1
+    else:
+        missing_sections.append({
+            "section": "portfolio",
+            "name": "Current Portfolio",
+            "message": "Please add at least one holding to your portfolio"
+        })
+    
+    return {
+        "is_complete": len(missing_sections) == 0,
+        "missing_sections": missing_sections,
+        "completion_percentage": int((completed_items / total_items) * 100),
+        "completed_items": completed_items,
+        "total_items": total_items
+    }
+
+
+def _compute_profile_hash(user_id: str) -> str:
+    """
+    Compute a hash of the user's profile to detect changes.
+    Used to determine if analysis needs regeneration.
+    """
+    import hashlib
+    import json
+    
+    context = get_user_context(user_id)
+    holdings = get_user_holdings(user_id)
+    
+    # Create a string representation of the profile
+    profile_data = {
+        "context": {
+            "investment_philosophy": context.get('investment_philosophy', ''),
+            "goals": context.get('goals', ''),
+            "risk_tolerance": context.get('risk_tolerance', ''),
+            "time_horizon": context.get('time_horizon', ''),
+            "knowledge_assessment": context.get('knowledge_assessment', {}),
+        },
+        "holdings": sorted([
+            {"ticker": h.get('ticker', ''), "shares": h.get('shares', 0)}
+            for h in holdings.get('holdings', [])
+        ], key=lambda x: x['ticker'])
+    }
+    
+    profile_str = json.dumps(profile_data, sort_keys=True)
+    return hashlib.md5(profile_str.encode()).hexdigest()
+
+
+def get_cached_analysis(user_id: str) -> Dict:
+    """
+    Get cached AI analysis for a user.
+    
+    Returns:
+        Dict with analysis, generated_at, profile_hash, or None if no cache exists
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    with _get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT analysis_json, generated_at, profile_hash FROM user_ai_analysis WHERE user_id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            return None
+        
+        try:
+            analysis = json.loads(row["analysis_json"]) if row["analysis_json"] else None
+        except:
+            analysis = None
+        
+        return {
+            "analysis": analysis,
+            "generated_at": row["generated_at"],
+            "profile_hash": row["profile_hash"]
+        }
+
+
+def save_cached_analysis(user_id: str, analysis: Dict) -> Dict:
+    """
+    Save AI analysis to cache.
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    now = datetime.now().isoformat()
+    profile_hash = _compute_profile_hash(user_id)
+    analysis_json = json.dumps(analysis)
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Upsert the analysis
+            cursor.execute('''
+                INSERT INTO user_ai_analysis (user_id, analysis_json, generated_at, profile_hash)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    analysis_json = excluded.analysis_json,
+                    generated_at = excluded.generated_at,
+                    profile_hash = excluded.profile_hash
+            ''', (user_id, analysis_json, now, profile_hash))
+            
+            conn.commit()
+            
+            return {
+                "success": True,
+                "generated_at": now,
+                "profile_hash": profile_hash
+            }
+            
+    except Exception as e:
+        return {"error": f"Failed to save analysis: {str(e)}"}
+
+
+def should_regenerate_analysis(user_id: str, cooldown_minutes: int = 5) -> Dict:
+    """
+    Check if analysis should be regenerated.
+    
+    Analysis should be regenerated if:
+    1. No cached analysis exists
+    2. Profile has changed (different hash)
+    3. Cooldown period has passed AND profile changed
+    
+    Returns:
+        Dict with should_regenerate, reason, and cached analysis if available
+    """
+    cached = get_cached_analysis(user_id)
+    
+    if cached is None or cached.get('analysis') is None:
+        return {
+            "should_regenerate": True,
+            "reason": "no_cache",
+            "cached_analysis": None
+        }
+    
+    current_hash = _compute_profile_hash(user_id)
+    cached_hash = cached.get('profile_hash', '')
+    
+    # Check if profile changed
+    profile_changed = current_hash != cached_hash
+    
+    if not profile_changed:
+        return {
+            "should_regenerate": False,
+            "reason": "no_changes",
+            "cached_analysis": cached
+        }
+    
+    # Profile changed - check cooldown
+    generated_at = cached.get('generated_at')
+    if generated_at:
+        from datetime import datetime, timedelta
+        try:
+            gen_time = datetime.fromisoformat(generated_at)
+            cooldown_end = gen_time + timedelta(minutes=cooldown_minutes)
+            
+            if datetime.now() < cooldown_end:
+                # Still in cooldown, return cached but note it's stale
+                remaining = (cooldown_end - datetime.now()).seconds // 60
+                return {
+                    "should_regenerate": False,
+                    "reason": "cooldown",
+                    "cooldown_remaining_minutes": remaining + 1,
+                    "cached_analysis": cached,
+                    "profile_changed": True
+                }
+        except:
+            pass
+    
+    # Profile changed and cooldown passed
+    return {
+        "should_regenerate": True,
+        "reason": "profile_changed",
+        "cached_analysis": cached
     }

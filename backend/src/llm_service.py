@@ -405,3 +405,195 @@ class LLMService:
         except Exception as e:
             print(f"LLM Result Interpretation Error: {e}")
             return {"result_explanation": "Unable to interpret results."}
+
+    def generate_portfolio_analysis(self, user_profile: dict, portfolio_data: dict, market_analysis: dict, secular_trends: str) -> dict:
+        """
+        Generates personalized portfolio analysis and recommendations.
+        
+        Uses Modern Portfolio Theory, Kelly Criterion for bet sizing, and 
+        optimizes for Sharpe ratio while considering the user's profile.
+        
+        Args:
+            user_profile: User's investment context (philosophy, goals, risk tolerance, knowledge level)
+            portfolio_data: Current portfolio holdings with prices and allocations
+            market_analysis: Today's market analysis and insights
+            secular_trends: List of secular trends for investment idea inspiration
+        
+        Returns:
+            Dict with recommendations, allocation changes, and new investment ideas
+        """
+        if not self.client:
+            return {"error": "LLM client not initialized"}
+        
+        # Extract knowledge level for explanation depth
+        knowledge = user_profile.get('knowledge_assessment', {})
+        avg_knowledge = sum(knowledge.values()) / max(len(knowledge), 1) if knowledge else 2
+        
+        # Determine explanation complexity
+        if avg_knowledge >= 4:
+            explanation_level = "expert-level, using technical jargon and advanced concepts freely"
+        elif avg_knowledge >= 3:
+            explanation_level = "intermediate-level, explaining some technical terms but assuming basic market knowledge"
+        elif avg_knowledge >= 2:
+            explanation_level = "beginner-friendly, explaining all concepts clearly with simple analogies"
+        else:
+            explanation_level = "very basic, using everyday language and avoiding jargon entirely"
+        
+        prompt = f"""
+You are an elite Portfolio Strategist and Quantitative Analyst with expertise in Modern Portfolio Theory, risk management, and asset allocation. Your task is to analyze a user's portfolio and provide personalized, actionable recommendations.
+
+### User Profile
+- **Investment Philosophy**: {user_profile.get('investment_philosophy', 'Not specified')}
+- **Goals**: {user_profile.get('goals', 'Not specified')}
+- **Risk Tolerance**: {user_profile.get('risk_tolerance', 'moderate')}
+- **Time Horizon**: {user_profile.get('time_horizon', 'medium')}
+- **Investment Experience**: {user_profile.get('investment_experience', 'beginner')}
+- **Age Range**: {user_profile.get('age_range', 'Not specified')}
+- **Income Level**: {user_profile.get('income_level', 'Not specified')}
+
+### Knowledge Assessment (0-5 scale)
+{json.dumps(knowledge, indent=2)}
+
+### Current Portfolio
+Total Value: ${portfolio_data.get('total_value', 0):,.2f}
+Portfolio Beta: {portfolio_data.get('portfolio_beta', 1.0):.2f}
+Current Holdings:
+{json.dumps(portfolio_data.get('holdings', []), indent=2)}
+
+Sector Allocation:
+{json.dumps(portfolio_data.get('sector_allocation', {}), indent=2)}
+
+Asset Allocation:
+- Equities: {portfolio_data.get('equities_percent', 0):.1f}%
+- Bonds: {portfolio_data.get('bonds_percent', 0):.1f}%
+- Cash: {portfolio_data.get('cash_percent', 0):.1f}%
+
+### Today's Market Analysis
+{json.dumps(market_analysis, indent=2) if market_analysis else 'No market analysis available for today.'}
+
+### Secular Trends for Inspiration
+{secular_trends}
+
+### Your Task
+Provide a comprehensive portfolio analysis following these principles:
+
+1. **Modern Portfolio Theory (MPT)**: Optimize for the efficient frontier - maximize expected return for a given level of risk.
+
+2. **Kelly Criterion for Position Sizing**: Use professional-grade bet sizing. For each recommendation:
+   - Conservative Kelly: f* = (edge / odds) * 0.25 (quarter Kelly for safety)
+   - Consider correlation with existing positions
+   - Account for estimation uncertainty
+
+3. **Sharpe Ratio Optimization**: Maximize risk-adjusted returns. Consider:
+   - Expected return vs risk-free rate
+   - Volatility of each position
+   - Correlation benefits from diversification
+
+4. **Macroeconomic Considerations**: Factor in current market conditions UNLESS the user's philosophy explicitly states otherwise.
+
+5. **Uncorrelated Opportunities**: Based on the portfolio's current themes/narratives, suggest at least ONE uncorrelated secular trend that might be interesting. Use the secular trends list for inspiration.
+
+### Explanation Depth
+Provide explanations at {explanation_level}.
+
+### Important Guidelines
+- Do NOT use emojis in any response
+- Be professional and analytical in tone
+- Focus on actionable, specific recommendations
+
+### Output Format (JSON ONLY)
+{{
+    "overall_assessment": {{
+        "summary": "2-3 sentence overview of portfolio health",
+        "risk_score": 1-10,
+        "diversification_score": 1-10,
+        "alignment_with_goals": "How well the portfolio aligns with stated goals"
+    }},
+    "portfolio_themes": [
+        {{
+            "theme": "e.g., AI/Tech concentration",
+            "current_exposure": "X% of portfolio",
+            "assessment": "Your view on this theme exposure"
+        }}
+    ],
+    "allocation_recommendations": [
+        {{
+            "action": "INCREASE|DECREASE|HOLD|ADD|REMOVE",
+            "ticker": "SYMBOL or 'ASSET_CLASS'",
+            "current_allocation": "X%",
+            "target_allocation": "Y%",
+            "kelly_fraction": "Optimal position size based on Kelly",
+            "rationale": "Why this change optimizes the portfolio",
+            "priority": "HIGH|MEDIUM|LOW",
+            "sharpe_impact": "Expected impact on portfolio Sharpe ratio"
+        }}
+    ],
+    "new_investment_ideas": [
+        {{
+            "thesis": "The investment thesis",
+            "secular_trend": "Which secular trend this relates to",
+            "suggested_exposure": "Ticker or ETF",
+            "allocation_recommendation": "X% of portfolio",
+            "correlation_benefit": "How this diversifies the portfolio",
+            "risk_factors": ["Risk 1", "Risk 2"],
+            "time_horizon": "When this thesis might play out"
+        }}
+    ],
+    "macro_considerations": {{
+        "current_environment": "Brief market environment assessment",
+        "portfolio_positioning": "How the portfolio is positioned for current conditions",
+        "adjustments_suggested": "Any macro-driven changes"
+    }},
+    "rebalancing_priority": [
+        "Most important action first",
+        "Second priority",
+        "Third priority"
+    ],
+    "key_risks": [
+        {{
+            "risk": "Description of risk",
+            "mitigation": "How to address it",
+            "urgency": "HIGH|MEDIUM|LOW"
+        }}
+    ],
+    "educational_note": "One concept the user might benefit from learning based on their knowledge gaps (if any)"
+}}
+"""
+        
+        # --- LOGGING START ---
+        print("\n" + "="*60)
+        print(f"🚀 [generate_portfolio_analysis] Sending to {self.model_name}:")
+        print("-" * 20)
+        print(prompt[:2000] + "..." if len(prompt) > 2000 else prompt)
+        print("="*60 + "\n")
+        # --- LOGGING END ---
+
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
+            text = response.text.strip()
+            
+            # Clean up markdown code blocks
+            if text.startswith("```json"):
+                text = text[7:]
+            elif text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            
+            text = text.strip()
+            
+            try:
+                result = json.loads(text)
+                result['generated_at'] = __import__('datetime').datetime.now().isoformat()
+                return result
+            except json.JSONDecodeError as e:
+                print(f"JSON Parse Error: {e}")
+                print(f"Raw response: {text[:500]}")
+                return {"error": "Failed to parse AI response", "raw": text[:1000]}
+                
+        except Exception as e:
+            print(f"LLM Portfolio Analysis Error: {e}")
+            return {"error": f"Failed to generate analysis: {str(e)}"}
