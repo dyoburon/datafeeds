@@ -38,6 +38,12 @@ CONTENT_TYPES = {
         "description": "Daily summary of major indices, sector performance, and key metrics.",
         "enabled": True
     },
+    "watchlist_news": {
+        "id": "watchlist_news",
+        "name": "Watchlist Updates",
+        "description": "Daily news and performance updates for stocks in your personal watchlist.",
+        "enabled": True
+    },
 }
 
 
@@ -70,9 +76,71 @@ def _init_db():
             )
         ''')
         
+        # User watchlist table (stocks the user wants to track)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_watchlist (
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, ticker),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
         # Create index for faster email lookups
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
+        ''')
+        
+        # Create index for watchlist lookups
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_watchlist_user ON user_watchlist(user_id)
+        ''')
+        
+        # User context table (investment profile, philosophy, goals)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_context (
+                user_id TEXT PRIMARY KEY,
+                investment_philosophy TEXT DEFAULT '',
+                goals TEXT DEFAULT '',
+                risk_tolerance TEXT DEFAULT 'moderate',
+                time_horizon TEXT DEFAULT 'medium',
+                income_level TEXT DEFAULT '',
+                age_range TEXT DEFAULT '',
+                investment_experience TEXT DEFAULT 'beginner',
+                knowledge_assessment TEXT DEFAULT '{}',
+                notes TEXT DEFAULT '',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Add knowledge_assessment column if it doesn't exist (migration)
+        try:
+            cursor.execute("ALTER TABLE user_context ADD COLUMN knowledge_assessment TEXT DEFAULT '{}'")
+        except:
+            pass  # Column already exists
+        
+        # User portfolio holdings table (actual portfolio positions)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_holdings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                shares REAL NOT NULL,
+                cost_basis REAL,
+                purchase_date TEXT,
+                account_type TEXT DEFAULT 'taxable',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Create index for holdings lookups
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_holdings_user ON user_holdings(user_id)
         ''')
         
         conn.commit()
@@ -94,7 +162,7 @@ def _get_db():
         conn.close()
 
 
-def _row_to_user(row: sqlite3.Row, preferences: List[str] = None) -> Dict:
+def _row_to_user(row: sqlite3.Row, preferences: List[str] = None, watchlist: List[str] = None) -> Dict:
     """Convert a database row to a user dictionary."""
     return {
         "id": row["id"],
@@ -102,6 +170,7 @@ def _row_to_user(row: sqlite3.Row, preferences: List[str] = None) -> Dict:
         "name": row["name"] or "",
         "active": bool(row["active"]),
         "preferences": preferences if preferences is not None else [],
+        "watchlist": watchlist if watchlist is not None else [],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"]
     }
@@ -114,8 +183,15 @@ def _get_user_preferences(conn: sqlite3.Connection, user_id: str) -> List[str]:
     return [row[0] for row in cursor.fetchall()]
 
 
+def _get_user_watchlist(conn: sqlite3.Connection, user_id: str) -> List[str]:
+    """Get all watchlist tickers for a user."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT ticker FROM user_watchlist WHERE user_id = ? ORDER BY added_at", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+
 def get_all_users() -> List[Dict]:
-    """Get all registered users with their preferences."""
+    """Get all registered users with their preferences and watchlist."""
     with _get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
@@ -124,7 +200,8 @@ def get_all_users() -> List[Dict]:
         users = []
         for row in rows:
             preferences = _get_user_preferences(conn, row["id"])
-            users.append(_row_to_user(row, preferences))
+            watchlist = _get_user_watchlist(conn, row["id"])
+            users.append(_row_to_user(row, preferences, watchlist))
         
         return users
 
@@ -140,7 +217,8 @@ def get_user_by_id(user_id: str) -> Optional[Dict]:
             return None
         
         preferences = _get_user_preferences(conn, user_id)
-        return _row_to_user(row, preferences)
+        watchlist = _get_user_watchlist(conn, user_id)
+        return _row_to_user(row, preferences, watchlist)
 
 
 def get_user_by_email(email: str) -> Optional[Dict]:
@@ -155,7 +233,8 @@ def get_user_by_email(email: str) -> Optional[Dict]:
             return None
         
         preferences = _get_user_preferences(conn, row["id"])
-        return _row_to_user(row, preferences)
+        watchlist = _get_user_watchlist(conn, row["id"])
+        return _row_to_user(row, preferences, watchlist)
 
 
 def get_or_create_user(email: str, name: str = "", preferences: Optional[List[str]] = None) -> Dict:
@@ -239,6 +318,7 @@ def create_user(email: str, name: str = "", preferences: Optional[List[str]] = N
                 "email": email,
                 "name": name.strip() if name else "",
                 "preferences": preferences,
+                "watchlist": [],
                 "active": True,
                 "created_at": now,
                 "updated_at": now
@@ -354,7 +434,8 @@ def get_users_by_content_type(content_type_id: str) -> List[Dict]:
         users = []
         for row in rows:
             preferences = _get_user_preferences(conn, row["id"])
-            users.append(_row_to_user(row, preferences))
+            watchlist = _get_user_watchlist(conn, row["id"])
+            users.append(_row_to_user(row, preferences, watchlist))
         
         return users
 
@@ -475,3 +556,560 @@ def get_active_user_count() -> int:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users WHERE active = 1")
         return cursor.fetchone()[0]
+
+
+# ============== WATCHLIST MANAGEMENT ==============
+
+def get_watchlist(user_id: str) -> Dict:
+    """Get a user's watchlist."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    return {"watchlist": user.get("watchlist", [])}
+
+
+def update_watchlist(user_id: str, tickers: List[str]) -> Dict:
+    """
+    Replace a user's entire watchlist with new tickers.
+    
+    Args:
+        user_id: The user's ID
+        tickers: List of ticker symbols (will be uppercased)
+    
+    Returns:
+        Updated user object or error dict
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    # Normalize tickers (uppercase, strip whitespace, remove duplicates)
+    normalized = list(dict.fromkeys([t.strip().upper() for t in tickers if t.strip()]))
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Delete existing watchlist
+            cursor.execute("DELETE FROM user_watchlist WHERE user_id = ?", (user_id,))
+            
+            # Insert new tickers
+            for ticker in normalized:
+                cursor.execute(
+                    "INSERT INTO user_watchlist (user_id, ticker, added_at) VALUES (?, ?, ?)",
+                    (user_id, ticker, now)
+                )
+            
+            # Update user's updated_at
+            cursor.execute(
+                "UPDATE users SET updated_at = ? WHERE id = ?",
+                (now, user_id)
+            )
+            
+            conn.commit()
+            
+            return get_user_by_id(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to update watchlist: {str(e)}"}
+
+
+def add_to_watchlist(user_id: str, ticker: str) -> Dict:
+    """Add a single ticker to a user's watchlist."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    ticker = ticker.strip().upper()
+    if not ticker:
+        return {"error": "Invalid ticker symbol"}
+    
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Check if already exists
+            cursor.execute(
+                "SELECT 1 FROM user_watchlist WHERE user_id = ? AND ticker = ?",
+                (user_id, ticker)
+            )
+            
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO user_watchlist (user_id, ticker, added_at) VALUES (?, ?, ?)",
+                    (user_id, ticker, now)
+                )
+                cursor.execute(
+                    "UPDATE users SET updated_at = ? WHERE id = ?",
+                    (now, user_id)
+                )
+                conn.commit()
+            
+            return get_user_by_id(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to add to watchlist: {str(e)}"}
+
+
+def remove_from_watchlist(user_id: str, ticker: str) -> Dict:
+    """Remove a ticker from a user's watchlist."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    ticker = ticker.strip().upper()
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM user_watchlist WHERE user_id = ? AND ticker = ?",
+                (user_id, ticker)
+            )
+            cursor.execute(
+                "UPDATE users SET updated_at = ? WHERE id = ?",
+                (now, user_id)
+            )
+            conn.commit()
+            
+            return get_user_by_id(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to remove from watchlist: {str(e)}"}
+
+
+# ============== USER CONTEXT MANAGEMENT ==============
+
+def get_user_context(user_id: str) -> Dict:
+    """Get a user's investment context/profile."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    with _get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM user_context WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            # Return default empty context
+            return {
+                "user_id": user_id,
+                "investment_philosophy": "",
+                "goals": "",
+                "risk_tolerance": "moderate",
+                "time_horizon": "medium",
+                "income_level": "",
+                "age_range": "",
+                "investment_experience": "beginner",
+                "knowledge_assessment": {},
+                "notes": "",
+                "updated_at": None
+            }
+        
+        # Parse knowledge_assessment JSON
+        import json
+        knowledge = {}
+        try:
+            ka = row["knowledge_assessment"] if "knowledge_assessment" in row.keys() else "{}"
+            knowledge = json.loads(ka) if ka else {}
+        except:
+            knowledge = {}
+        
+        return {
+            "user_id": row["user_id"],
+            "investment_philosophy": row["investment_philosophy"] or "",
+            "goals": row["goals"] or "",
+            "risk_tolerance": row["risk_tolerance"] or "moderate",
+            "time_horizon": row["time_horizon"] or "medium",
+            "income_level": row["income_level"] or "",
+            "age_range": row["age_range"] or "",
+            "investment_experience": row["investment_experience"] or "beginner",
+            "knowledge_assessment": knowledge,
+            "notes": row["notes"] or "",
+            "updated_at": row["updated_at"]
+        }
+
+
+def update_user_context(user_id: str, context_data: Dict) -> Dict:
+    """
+    Update a user's investment context/profile.
+    
+    Args:
+        user_id: The user's ID
+        context_data: Dict with any of these fields:
+            - investment_philosophy
+            - goals
+            - risk_tolerance (conservative, moderate, aggressive)
+            - time_horizon (short, medium, long)
+            - income_level
+            - age_range
+            - investment_experience (beginner, intermediate, advanced)
+            - knowledge_assessment (dict with category scores)
+            - notes
+    
+    Returns:
+        Updated context or error dict
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    now = datetime.now().isoformat()
+    
+    # Valid options for constrained fields
+    valid_risk = ['conservative', 'moderate', 'aggressive']
+    valid_horizon = ['short', 'medium', 'long']
+    valid_experience = ['beginner', 'intermediate', 'advanced']
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Check if context exists
+            cursor.execute("SELECT user_id FROM user_context WHERE user_id = ?", (user_id,))
+            exists = cursor.fetchone()
+            
+            if exists:
+                # Update existing context
+                updates = []
+                values = []
+                
+                if 'investment_philosophy' in context_data:
+                    updates.append("investment_philosophy = ?")
+                    values.append(context_data['investment_philosophy'])
+                    
+                if 'goals' in context_data:
+                    updates.append("goals = ?")
+                    values.append(context_data['goals'])
+                    
+                if 'risk_tolerance' in context_data:
+                    rt = context_data['risk_tolerance'].lower()
+                    if rt in valid_risk:
+                        updates.append("risk_tolerance = ?")
+                        values.append(rt)
+                        
+                if 'time_horizon' in context_data:
+                    th = context_data['time_horizon'].lower()
+                    if th in valid_horizon:
+                        updates.append("time_horizon = ?")
+                        values.append(th)
+                        
+                if 'income_level' in context_data:
+                    updates.append("income_level = ?")
+                    values.append(context_data['income_level'])
+                    
+                if 'age_range' in context_data:
+                    updates.append("age_range = ?")
+                    values.append(context_data['age_range'])
+                    
+                if 'investment_experience' in context_data:
+                    exp = context_data['investment_experience'].lower()
+                    if exp in valid_experience:
+                        updates.append("investment_experience = ?")
+                        values.append(exp)
+                        
+                if 'notes' in context_data:
+                    updates.append("notes = ?")
+                    values.append(context_data['notes'])
+                
+                if 'knowledge_assessment' in context_data:
+                    updates.append("knowledge_assessment = ?")
+                    values.append(json.dumps(context_data['knowledge_assessment']))
+                
+                if updates:
+                    updates.append("updated_at = ?")
+                    values.append(now)
+                    values.append(user_id)
+                    
+                    cursor.execute(
+                        f"UPDATE user_context SET {', '.join(updates)} WHERE user_id = ?",
+                        values
+                    )
+            else:
+                # Insert new context
+                cursor.execute('''
+                    INSERT INTO user_context 
+                    (user_id, investment_philosophy, goals, risk_tolerance, time_horizon, 
+                     income_level, age_range, investment_experience, knowledge_assessment, notes, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    user_id,
+                    context_data.get('investment_philosophy', ''),
+                    context_data.get('goals', ''),
+                    context_data.get('risk_tolerance', 'moderate').lower() if context_data.get('risk_tolerance', '').lower() in valid_risk else 'moderate',
+                    context_data.get('time_horizon', 'medium').lower() if context_data.get('time_horizon', '').lower() in valid_horizon else 'medium',
+                    context_data.get('income_level', ''),
+                    context_data.get('age_range', ''),
+                    context_data.get('investment_experience', 'beginner').lower() if context_data.get('investment_experience', '').lower() in valid_experience else 'beginner',
+                    json.dumps(context_data.get('knowledge_assessment', {})),
+                    context_data.get('notes', ''),
+                    now
+                ))
+            
+            conn.commit()
+            return get_user_context(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to update user context: {str(e)}"}
+
+
+# ============== PORTFOLIO HOLDINGS MANAGEMENT ==============
+
+def get_user_holdings(user_id: str) -> Dict:
+    """Get all portfolio holdings for a user."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    with _get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM user_holdings WHERE user_id = ? ORDER BY ticker
+        ''', (user_id,))
+        rows = cursor.fetchall()
+        
+        holdings = []
+        for row in rows:
+            holdings.append({
+                "id": row["id"],
+                "ticker": row["ticker"],
+                "shares": row["shares"],
+                "cost_basis": row["cost_basis"],
+                "purchase_date": row["purchase_date"],
+                "account_type": row["account_type"],
+                "notes": row["notes"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]
+            })
+        
+        return {"holdings": holdings, "count": len(holdings)}
+
+
+def add_holding(user_id: str, holding_data: Dict) -> Dict:
+    """
+    Add a new holding to the user's portfolio.
+    
+    Args:
+        user_id: The user's ID
+        holding_data: Dict with:
+            - ticker (required)
+            - shares (required)
+            - cost_basis (optional)
+            - purchase_date (optional)
+            - account_type (optional: taxable, ira, roth_ira, 401k)
+            - notes (optional)
+    
+    Returns:
+        Updated holdings list or error dict
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    ticker = holding_data.get('ticker', '').strip().upper()
+    shares = holding_data.get('shares')
+    
+    if not ticker:
+        return {"error": "Ticker is required"}
+    if shares is None or shares <= 0:
+        return {"error": "Valid number of shares is required"}
+    
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO user_holdings 
+                (user_id, ticker, shares, cost_basis, purchase_date, account_type, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                user_id,
+                ticker,
+                shares,
+                holding_data.get('cost_basis'),
+                holding_data.get('purchase_date'),
+                holding_data.get('account_type', 'taxable'),
+                holding_data.get('notes', ''),
+                now,
+                now
+            ))
+            
+            conn.commit()
+            return get_user_holdings(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to add holding: {str(e)}"}
+
+
+def update_holding(user_id: str, holding_id: int, updates: Dict) -> Dict:
+    """Update an existing holding."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Verify holding belongs to user
+            cursor.execute(
+                "SELECT id FROM user_holdings WHERE id = ? AND user_id = ?",
+                (holding_id, user_id)
+            )
+            if not cursor.fetchone():
+                return {"error": "Holding not found"}
+            
+            update_parts = []
+            values = []
+            
+            if 'ticker' in updates:
+                update_parts.append("ticker = ?")
+                values.append(updates['ticker'].strip().upper())
+                
+            if 'shares' in updates:
+                update_parts.append("shares = ?")
+                values.append(updates['shares'])
+                
+            if 'cost_basis' in updates:
+                update_parts.append("cost_basis = ?")
+                values.append(updates['cost_basis'])
+                
+            if 'purchase_date' in updates:
+                update_parts.append("purchase_date = ?")
+                values.append(updates['purchase_date'])
+                
+            if 'account_type' in updates:
+                update_parts.append("account_type = ?")
+                values.append(updates['account_type'])
+                
+            if 'notes' in updates:
+                update_parts.append("notes = ?")
+                values.append(updates['notes'])
+            
+            if update_parts:
+                update_parts.append("updated_at = ?")
+                values.append(now)
+                values.append(holding_id)
+                
+                cursor.execute(
+                    f"UPDATE user_holdings SET {', '.join(update_parts)} WHERE id = ?",
+                    values
+                )
+                conn.commit()
+            
+            return get_user_holdings(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to update holding: {str(e)}"}
+
+
+def delete_holding(user_id: str, holding_id: int) -> Dict:
+    """Delete a holding from the user's portfolio."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Verify holding belongs to user
+            cursor.execute(
+                "SELECT id FROM user_holdings WHERE id = ? AND user_id = ?",
+                (holding_id, user_id)
+            )
+            if not cursor.fetchone():
+                return {"error": "Holding not found"}
+            
+            cursor.execute("DELETE FROM user_holdings WHERE id = ?", (holding_id,))
+            conn.commit()
+            
+            return get_user_holdings(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to delete holding: {str(e)}"}
+
+
+def replace_all_holdings(user_id: str, holdings: List[Dict]) -> Dict:
+    """
+    Replace all holdings for a user (bulk update).
+    
+    Args:
+        user_id: The user's ID
+        holdings: List of holding dicts with ticker, shares, etc.
+    
+    Returns:
+        Updated holdings list or error dict
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    now = datetime.now().isoformat()
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Delete all existing holdings
+            cursor.execute("DELETE FROM user_holdings WHERE user_id = ?", (user_id,))
+            
+            # Insert new holdings
+            for h in holdings:
+                ticker = h.get('ticker', '').strip().upper()
+                shares = h.get('shares')
+                
+                if ticker and shares and shares > 0:
+                    cursor.execute('''
+                        INSERT INTO user_holdings 
+                        (user_id, ticker, shares, cost_basis, purchase_date, account_type, notes, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        user_id,
+                        ticker,
+                        shares,
+                        h.get('cost_basis'),
+                        h.get('purchase_date'),
+                        h.get('account_type', 'taxable'),
+                        h.get('notes', ''),
+                        now,
+                        now
+                    ))
+            
+            conn.commit()
+            return get_user_holdings(user_id)
+            
+    except Exception as e:
+        return {"error": f"Failed to replace holdings: {str(e)}"}
+
+
+def get_full_user_profile(user_id: str) -> Dict:
+    """
+    Get complete user profile including context, holdings, and preferences.
+    This is the main function for the recommendation engine.
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    context = get_user_context(user_id)
+    holdings = get_user_holdings(user_id)
+    
+    return {
+        "user": user,
+        "context": context if 'error' not in context else {},
+        "holdings": holdings.get('holdings', []) if 'error' not in holdings else [],
+        "holdings_count": holdings.get('count', 0) if 'error' not in holdings else 0
+    }

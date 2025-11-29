@@ -23,6 +23,7 @@ interface BackendUser {
   name: string;
   active: boolean;
   preferences: string[];
+  watchlist: string[];
   created_at: string;
   updated_at: string;
   created?: boolean; // True if this user was just created

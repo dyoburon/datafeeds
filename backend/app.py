@@ -17,8 +17,12 @@ from src.email_service import send_daily_email_task
 from src.user_service import (
     get_all_users, get_user_by_id, get_user_by_email, create_user, 
     update_user, delete_user, get_content_types, get_enabled_content_types,
-    add_preference, remove_preference, add_users_bulk, get_or_create_user
+    add_preference, remove_preference, add_users_bulk, get_or_create_user,
+    get_watchlist, update_watchlist, add_to_watchlist, remove_from_watchlist,
+    get_user_context, update_user_context, get_user_holdings, add_holding,
+    update_holding, delete_holding, replace_all_holdings, get_full_user_profile
 )
+from src.watchlist_service import get_watchlist_for_email, get_ticker_data
 from flask import request
 
 app = Flask(__name__)
@@ -443,6 +447,286 @@ def list_content_types():
             "content_types": content_types,
             "enabled_types": enabled
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== WATCHLIST ENDPOINTS ==============
+
+@app.route('/api/users/<user_id>/watchlist', methods=['GET'])
+def get_user_watchlist(user_id):
+    """Get a user's watchlist."""
+    try:
+        result = get_watchlist(user_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/watchlist', methods=['PUT'])
+def update_user_watchlist(user_id):
+    """
+    Replace a user's entire watchlist.
+    
+    Body: { "tickers": ["AAPL", "MSFT", "GOOGL"] }
+    """
+    try:
+        data = request.json
+        if not data or 'tickers' not in data:
+            return jsonify({"error": "Missing 'tickers' array in request body"}), 400
+        
+        if not isinstance(data['tickers'], list):
+            return jsonify({"error": "'tickers' must be an array"}), 400
+        
+        result = update_watchlist(user_id, data['tickers'])
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/watchlist', methods=['POST'])
+def add_to_user_watchlist(user_id):
+    """
+    Add a ticker to a user's watchlist.
+    
+    Body: { "ticker": "AAPL" }
+    """
+    try:
+        data = request.json
+        if not data or 'ticker' not in data:
+            return jsonify({"error": "Missing 'ticker' in request body"}), 400
+        
+        result = add_to_watchlist(user_id, data['ticker'])
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/watchlist/<ticker>', methods=['DELETE'])
+def remove_from_user_watchlist(user_id, ticker):
+    """Remove a ticker from a user's watchlist."""
+    try:
+        result = remove_from_watchlist(user_id, ticker)
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/watchlist/preview', methods=['POST'])
+def preview_watchlist_data():
+    """
+    Preview watchlist data for given tickers (for testing/preview).
+    
+    Body: { "tickers": ["AAPL", "MSFT"], "max_tickers": 5 }
+    """
+    try:
+        data = request.json
+        if not data or 'tickers' not in data:
+            return jsonify({"error": "Missing 'tickers' in request body"}), 400
+        
+        max_tickers = data.get('max_tickers', 5)
+        result = get_watchlist_for_email(data['tickers'], max_tickers)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ticker/<ticker>', methods=['GET'])
+def get_ticker_info(ticker):
+    """Get info and news for a single ticker."""
+    try:
+        result = get_ticker_data(ticker.upper())
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== USER CONTEXT ENDPOINTS ==============
+
+@app.route('/api/users/<user_id>/context', methods=['GET'])
+def get_user_context_endpoint(user_id):
+    """Get a user's investment context/profile."""
+    try:
+        result = get_user_context(user_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/context', methods=['PUT', 'PATCH'])
+def update_user_context_endpoint(user_id):
+    """
+    Update a user's investment context/profile.
+    
+    Body: {
+        "investment_philosophy": "...",
+        "goals": "...",
+        "risk_tolerance": "conservative|moderate|aggressive",
+        "time_horizon": "short|medium|long",
+        "income_level": "...",
+        "age_range": "...",
+        "investment_experience": "beginner|intermediate|advanced",
+        "notes": "..."
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        result = update_user_context(user_id, data)
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== USER HOLDINGS ENDPOINTS ==============
+
+@app.route('/api/users/<user_id>/holdings', methods=['GET'])
+def get_user_holdings_endpoint(user_id):
+    """Get a user's portfolio holdings."""
+    try:
+        result = get_user_holdings(user_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/holdings', methods=['POST'])
+def add_user_holding_endpoint(user_id):
+    """
+    Add a new holding to a user's portfolio.
+    
+    Body: {
+        "ticker": "AAPL",
+        "shares": 10,
+        "cost_basis": 150.00,
+        "purchase_date": "2024-01-15",
+        "account_type": "taxable|ira|roth_ira|401k",
+        "notes": "..."
+    }
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        result = add_holding(user_id, data)
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/holdings', methods=['PUT'])
+def replace_user_holdings_endpoint(user_id):
+    """
+    Replace all holdings for a user (bulk update).
+    
+    Body: {
+        "holdings": [
+            {"ticker": "AAPL", "shares": 10, "cost_basis": 150.00, ...},
+            {"ticker": "MSFT", "shares": 5, ...}
+        ]
+    }
+    """
+    try:
+        data = request.json
+        if not data or 'holdings' not in data:
+            return jsonify({"error": "Missing 'holdings' array"}), 400
+        
+        result = replace_all_holdings(user_id, data['holdings'])
+        
+        if 'error' in result:
+            status_code = 404 if result['error'] == "User not found" else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/holdings/<int:holding_id>', methods=['PUT', 'PATCH'])
+def update_user_holding_endpoint(user_id, holding_id):
+    """Update a specific holding."""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        result = update_holding(user_id, holding_id, data)
+        
+        if 'error' in result:
+            status_code = 404 if "not found" in result['error'].lower() else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/holdings/<int:holding_id>', methods=['DELETE'])
+def delete_user_holding_endpoint(user_id, holding_id):
+    """Delete a specific holding."""
+    try:
+        result = delete_holding(user_id, holding_id)
+        
+        if 'error' in result:
+            status_code = 404 if "not found" in result['error'].lower() else 400
+            return jsonify(result), status_code
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<user_id>/profile', methods=['GET'])
+def get_full_profile_endpoint(user_id):
+    """Get complete user profile including context, holdings, and preferences."""
+    try:
+        result = get_full_user_profile(user_id)
+        
+        if 'error' in result:
+            return jsonify(result), 404
+        
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -21,6 +21,12 @@ const CONTENT_TYPES = [
     description: 'Daily summary of major indices, sector performance, and key metrics.',
     icon: '📈',
   },
+  {
+    id: 'watchlist_news',
+    name: 'Watchlist Updates',
+    description: 'Daily news and performance updates for stocks in your personal watchlist.',
+    icon: '👁️',
+  },
 ];
 
 interface PreferencesModalProps {

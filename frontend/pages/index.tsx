@@ -299,15 +299,25 @@ export default function LandingPage() {
           {loading ? (
             <div className="w-24 h-10 bg-gray-800 rounded-full animate-pulse" />
           ) : user ? (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
               <Link href="/app">
                 <a className="text-gray-300 hover:text-white transition-colors">
-                  Dashboard
+                  Market Analysis
+                </a>
+              </Link>
+              <Link href="/portfolio">
+                <a className="text-gray-300 hover:text-white transition-colors">
+                  Portfolio
+                </a>
+              </Link>
+              <Link href="/profile">
+                <a className="text-gray-300 hover:text-white transition-colors">
+                  Profile
                 </a>
               </Link>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 flex items-center justify-center text-sm font-medium">
-                  {user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()}
+                  {user.displayName?.charAt(0) || user.email?.charAt(0)?.toUpperCase()}
                 </div>
                 <button
                   onClick={() => signOut()}

@@ -11,7 +11,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from datetime import datetime
 from dotenv import load_dotenv
-from .user_service import get_users_by_content_type
+from .user_service import get_users_by_content_type, get_user_by_id
+from .watchlist_service import get_watchlist_for_email
 
 # Load env vars if not already loaded
 load_dotenv()
@@ -110,6 +111,127 @@ def generate_chart_image(results_data, control_data):
     except Exception as e:
         print(f"Error generating chart: {e}")
         return None
+
+
+def generate_watchlist_html(user: dict) -> str:
+    """
+    Generate HTML section for a user's watchlist.
+    Returns empty string if user has no watchlist or watchlist_news preference.
+    """
+    # Check if user has watchlist_news preference
+    if 'watchlist_news' not in user.get('preferences', []):
+        return ""
+    
+    # Get user's watchlist
+    watchlist = user.get('watchlist', [])
+    if not watchlist:
+        return ""
+    
+    # Fetch watchlist data (max 5 tickers)
+    try:
+        watchlist_data = get_watchlist_for_email(watchlist, max_tickers=5)
+    except Exception as e:
+        print(f"Error fetching watchlist data for {user.get('email')}: {e}")
+        return ""
+    
+    if not watchlist_data.get('has_data'):
+        return ""
+    
+    tickers = watchlist_data.get('tickers', [])
+    
+    html_parts = []
+    html_parts.append("""
+        <div style="margin: 24px 0; border-top: 2px solid #e5e7eb; padding-top: 24px;">
+            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 20px;">
+                📋 Your Watchlist
+            </h3>
+    """)
+    
+    # Show count info if some tickers were excluded
+    if watchlist_data.get('excluded_count', 0) > 0:
+        html_parts.append(f"""
+            <p style="font-size: 12px; color: #6b7280; margin-bottom: 16px;">
+                Showing top {watchlist_data['showing']} of {watchlist_data['total_in_watchlist']} stocks (sorted by news activity)
+            </p>
+        """)
+    
+    for t in tickers:
+        # Determine color based on performance
+        change_pct = t.get('change_percent')
+        if change_pct is not None:
+            if change_pct > 0:
+                perf_color = "#059669"  # Green
+                perf_bg = "#d1fae5"
+                arrow = "▲"
+            elif change_pct < 0:
+                perf_color = "#dc2626"  # Red
+                perf_bg = "#fee2e2"
+                arrow = "▼"
+            else:
+                perf_color = "#6b7280"  # Gray
+                perf_bg = "#f3f4f6"
+                arrow = "–"
+            perf_text = f"{arrow} {'+' if change_pct > 0 else ''}{change_pct:.2f}%"
+        else:
+            perf_color = "#6b7280"
+            perf_bg = "#f3f4f6"
+            perf_text = "N/A"
+        
+        price = t.get('price')
+        price_text = f"${price:.2f}" if price else "N/A"
+        
+        headlines = t.get('headlines', [])
+        
+        html_parts.append(f"""
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; overflow: hidden;">
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: #f8fafc; border-bottom: 1px solid #e5e7eb;">
+                    <div>
+                        <span style="font-weight: 700; color: #111827; font-size: 16px;">{t['ticker']}</span>
+                        <span style="color: #6b7280; font-size: 13px; margin-left: 8px;">{t['name']}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span style="font-weight: 600; color: #374151; font-size: 15px;">{price_text}</span>
+                        <span style="margin-left: 8px; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 13px; background-color: {perf_bg}; color: {perf_color};">
+                            {perf_text}
+                        </span>
+                    </div>
+                </div>
+                <div style="padding: 12px 16px;">
+        """)
+        
+        if headlines:
+            html_parts.append("""
+                    <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Recent Headlines</div>
+                    <ul style="margin: 0; padding-left: 16px; color: #374151; font-size: 13px;">
+            """)
+            for h in headlines[:3]:
+                # Truncate long headlines
+                headline = h[:100] + "..." if len(h) > 100 else h
+                html_parts.append(f'<li style="margin-bottom: 4px;">{headline}</li>')
+            html_parts.append("</ul>")
+            
+            if t.get('news_count', 0) > 3:
+                html_parts.append(f"""
+                    <p style="font-size: 12px; color: #9ca3af; margin: 8px 0 0 0;">
+                        +{t['news_count'] - 3} more articles
+                    </p>
+                """)
+        else:
+            html_parts.append("""
+                    <p style="color: #9ca3af; font-size: 13px; font-style: italic; margin: 0;">
+                        No significant news today. The stock is trading normally without major catalysts.
+                    </p>
+            """)
+        
+        html_parts.append("""
+                </div>
+            </div>
+        """)
+    
+    html_parts.append("</div>")
+    
+    return "".join(html_parts)
+
 
 def send_daily_email_task():
     print("Email Service: Starting daily email task...")
@@ -315,8 +437,7 @@ def send_daily_email_task():
         </div>
         """)
 
-    # Glossary Section
-    # Gather all text content to check for terms
+    # Glossary Section - gather terms used in content
     all_text = (
         data.get('summary', '') + " " + 
         " ".join(data.get('top_news', [])) + " " + 
@@ -327,27 +448,34 @@ def send_daily_email_task():
     for term, definition in GLOSSARY.items():
         if term.lower() in all_text:
             used_terms.append((term, definition))
-            
+
+    # Store the base HTML parts (before personalized content)
+    base_html = "".join(html_parts)
+    
+    # Glossary HTML (will be included in all emails)
+    glossary_html_parts = []
     if used_terms:
-        html_parts.append("""
+        glossary_html_parts.append("""
             <div style="padding: 24px; border-top: 1px solid #e5e7eb;">
                 <h3 style="margin: 0 0 16px 0; color: #4b5563; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Glossary of Terms</h3>
                 <div style="font-size: 13px; color: #4b5563;">
         """)
         
         for term, definition in used_terms:
-            html_parts.append(f"""
+            glossary_html_parts.append(f"""
                 <div style="margin-bottom: 12px;">
                     <strong style="color: #1f2937;">{term}:</strong> {definition}
                 </div>
             """)
             
-        html_parts.append("""
+        glossary_html_parts.append("""
                 </div>
             </div>
         """)
-
-    html_parts.append("""
+    glossary_html = "".join(glossary_html_parts)
+    
+    # Footer HTML
+    footer_html = """
             </div>
             <div style="background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 12px; border-top: 1px solid #e5e7eb;">
                 Automated Daily Market Analysis System
@@ -355,37 +483,65 @@ def send_daily_email_task():
         </div>
     </body>
     </html>
-    """)
+    """
 
-    full_html = "".join(html_parts)
-
-    # 4. Build Message
-    msg = MIMEMultipart('related')
-    msg['Subject'] = f"Daily Market Insights: {date_str} (Score: {score})"
-    msg['From'] = sender_email
-    msg['To'] = ", ".join(recipients)
-
-    # Attach HTML
-    msg_alternative = MIMEMultipart('alternative')
-    msg.attach(msg_alternative)
-    msg_alternative.attach(MIMEText(full_html, 'html'))
-
-    # Attach Images with Content-IDs
-    for cid, img_data in images_to_attach:
-        img = MIMEImage(img_data)
-        img.add_header('Content-ID', f'<{cid}>')
-        img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
-        msg.attach(img)
-
-    # 5. Send
+    # 4. Send personalized emails to each user
     try:
         print("Email Service: Connecting to SMTP server...")
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(sender_email, sender_password)
-            server.send_message(msg)
-        print(f"Email Service: Email sent successfully to {len(recipients)} recipients.")
-        return {"status": "success", "message": "Email sent"}
+            
+            emails_sent = 0
+            
+            # Create a map of emails to user data for personalization
+            user_map = {u['email']: u for u in subscribed_users}
+            
+            for recipient_email in recipients:
+                # Get user data if available
+                user_data = user_map.get(recipient_email)
+                
+                # Generate personalized watchlist section
+                watchlist_html = ""
+                if user_data:
+                    try:
+                        watchlist_html = generate_watchlist_html(user_data)
+                    except Exception as e:
+                        print(f"Email Service: Error generating watchlist for {recipient_email}: {e}")
+                
+                # Build full HTML for this user
+                full_html = base_html + watchlist_html + glossary_html + footer_html
+                
+                # Build Message
+                msg = MIMEMultipart('related')
+                msg['Subject'] = f"Daily Market Insights: {date_str} (Score: {score})"
+                msg['From'] = sender_email
+                msg['To'] = recipient_email
+
+                # Attach HTML
+                msg_alternative = MIMEMultipart('alternative')
+                msg.attach(msg_alternative)
+                msg_alternative.attach(MIMEText(full_html, 'html'))
+
+                # Attach Images with Content-IDs
+                for cid, img_data in images_to_attach:
+                    img = MIMEImage(img_data)
+                    img.add_header('Content-ID', f'<{cid}>')
+                    img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
+                    msg.attach(img)
+                
+                # Send to this recipient
+                server.send_message(msg)
+                emails_sent += 1
+                
+                if watchlist_html:
+                    print(f"Email Service: Sent personalized email with watchlist to {recipient_email}")
+                else:
+                    print(f"Email Service: Sent email to {recipient_email}")
+            
+            print(f"Email Service: Successfully sent {emails_sent} emails.")
+            return {"status": "success", "message": f"Sent {emails_sent} emails"}
+            
     except Exception as e:
         print(f"Email Service: Failed to send email: {e}")
         return {"error": str(e)}
