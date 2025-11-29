@@ -134,14 +134,27 @@ def send_daily_email_task():
         print("Email Service: Missing credentials (EMAIL_USER, EMAIL_PASSWORD, or EMAIL_RECIPIENT).")
         return
 
+    # Handle multiple recipients
+    recipients = [r.strip() for r in recipient_email.split(',') if r.strip()]
+    if not recipients:
+        print("Email Service: No valid recipients found.")
+        return
+
     # 3. Prepare Email Content
     date_str = datetime.now().strftime("%B %d, %Y")
     score = data.get('intrigue_score', 0)
     
     # Header Color Logic
     header_bg = "#1e40af" # Blue default
-    if score >= 80: header_bg = "#065f46" # Green
-    if score < 50: header_bg = "#4b5563" # Gray
+    score_text = "Today's market conditions show interesting patterns worth monitoring."
+    if score >= 80: 
+        header_bg = "#065f46" # Green
+        score_text = "Market conditions today are statistically highly significant, suggesting strong potential for future price action."
+    elif score < 50: 
+        header_bg = "#4b5563" # Gray
+        score_text = "Today's market activity was largely noise with few statistically significant historical parallels."
+    elif score >= 60:
+        score_text = "Today shows some moderate historical patterns that may offer actionable insights."
 
     # Start HTML
     html_parts = []
@@ -155,6 +168,9 @@ def send_daily_email_task():
                 <h1 style="margin: 8px 0; font-size: 28px; font-weight: 700;">{date_str}</h1>
                 <div style="margin-top: 16px; display: inline-block; background-color: rgba(255,255,255,0.2); padding: 6px 16px; border-radius: 20px; font-weight: 600;">
                     Intrigue Score: {score}/100
+                </div>
+                <div style="margin-top: 8px; font-size: 13px; opacity: 0.9; font-style: italic;">
+                    {score_text}
                 </div>
             </div>
             
@@ -332,7 +348,7 @@ def send_daily_email_task():
     msg = MIMEMultipart('related')
     msg['Subject'] = f"Daily Market Insights: {date_str} (Score: {score})"
     msg['From'] = sender_email
-    msg['To'] = recipient_email
+    msg['To'] = ", ".join(recipients)
 
     # Attach HTML
     msg_alternative = MIMEMultipart('alternative')
@@ -353,7 +369,7 @@ def send_daily_email_task():
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        print("Email Service: Email sent successfully.")
+        print(f"Email Service: Email sent successfully to {len(recipients)} recipients.")
         return {"status": "success", "message": "Email sent"}
     except Exception as e:
         print(f"Email Service: Failed to send email: {e}")

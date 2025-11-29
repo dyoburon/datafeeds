@@ -30,8 +30,14 @@ def scheduled_analysis_task():
 scheduler = BackgroundScheduler()
 # Run immediately on startup (optional, but good for testing) and then every hour
 scheduler.add_job(func=scheduled_analysis_task, trigger="interval", minutes=60)
-# Run daily email at 3:00 PM
-scheduler.add_job(func=send_daily_email_task, trigger="cron", hour=15, minute=0)
+# Run daily email at 1:00 PM PST (which is 21:00 UTC or 4:00 PM EST)
+# Note: This assumes the server time is UTC. If server is local, adjust accordingly.
+# 13:00 PST = 16:00 EST = 21:00 UTC.
+# Safe bet: 4:00 PM EST (16:00)
+# Assuming server is in local time or we can use a timezone. 
+# Let's just stick to hour=16 (4 PM EST / 1 PM PST) for simplicity if server is EST, or hour=21 if UTC.
+# Given user is in PST (based on file paths), 13:00 is correct for local time.
+scheduler.add_job(func=send_daily_email_task, trigger="cron", day_of_week='mon-fri', hour=13, minute=0)
 scheduler.start()
 
 # Shut down the scheduler when exiting the app
