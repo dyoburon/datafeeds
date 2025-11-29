@@ -491,7 +491,7 @@ Provide a comprehensive portfolio analysis following these principles:
 
 4. **Macroeconomic Considerations**: Factor in current market conditions UNLESS the user's philosophy explicitly states otherwise.
 
-5. **Uncorrelated Opportunities**: Based on the portfolio's current themes/narratives, suggest at least ONE uncorrelated secular trend that might be interesting. Use the secular trends list for inspiration.
+5. **Uncorrelated Opportunities**: Based on the portfolio's current themes/narratives, suggest 2-3 uncorrelated secular trends that might be interesting. Use the secular trends list for inspiration. Each idea should represent a different theme or sector to maximize diversification benefit.
 
 ### Explanation Depth
 Provide explanations at {explanation_level}.
@@ -530,8 +530,26 @@ Provide explanations at {explanation_level}.
     ],
     "new_investment_ideas": [
         {{
-            "thesis": "The investment thesis",
+            "thesis": "First investment thesis",
             "secular_trend": "Which secular trend this relates to",
+            "suggested_exposure": "Ticker or ETF",
+            "allocation_recommendation": "X% of portfolio",
+            "correlation_benefit": "How this diversifies the portfolio",
+            "risk_factors": ["Risk 1", "Risk 2"],
+            "time_horizon": "When this thesis might play out"
+        }},
+        {{
+            "thesis": "Second investment thesis (different sector/theme)",
+            "secular_trend": "A different secular trend",
+            "suggested_exposure": "Ticker or ETF",
+            "allocation_recommendation": "X% of portfolio",
+            "correlation_benefit": "How this diversifies the portfolio",
+            "risk_factors": ["Risk 1", "Risk 2"],
+            "time_horizon": "When this thesis might play out"
+        }},
+        {{
+            "thesis": "Third investment thesis (optional but preferred)",
+            "secular_trend": "Another secular trend",
             "suggested_exposure": "Ticker or ETF",
             "allocation_recommendation": "X% of portfolio",
             "correlation_benefit": "How this diversifies the portfolio",
