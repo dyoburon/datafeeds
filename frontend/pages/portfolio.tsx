@@ -3,6 +3,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useAuth } from '../contexts/AuthContext';
 import { useRouter } from 'next/router';
+import { isCashTicker, isBondTicker } from '../utils/portfolioAnalytics';
 
 const API_BASE = 'http://localhost:5001';
 
@@ -42,6 +43,15 @@ interface PortfolioStats {
   averagePE: number;
   largestPosition: { ticker: string; percent: number } | null;
   diversificationScore: number;
+  // Asset Allocation
+  equitiesPercent: number;
+  equitiesValue: number;
+  bondsCashPercent: number;
+  bondsCashValue: number;
+  bondsPercent: number;
+  bondsValue: number;
+  cashPercent: number;
+  cashValue: number;
 }
 
 export default function PortfolioPage() {
@@ -100,6 +110,14 @@ export default function PortfolioPage() {
         averagePE: 0,
         largestPosition: null,
         diversificationScore: 0,
+        equitiesPercent: 0,
+        equitiesValue: 0,
+        bondsCashPercent: 0,
+        bondsCashValue: 0,
+        bondsPercent: 0,
+        bondsValue: 0,
+        cashPercent: 0,
+        cashValue: 0,
       };
     }
 
@@ -109,6 +127,9 @@ export default function PortfolioPage() {
     let weightedDividendYield = 0;
     let peSum = 0;
     let peCount = 0;
+    let equitiesValue = 0;
+    let bondsValue = 0;
+    let cashValue = 0;
     const sectorAllocation: Record<string, number> = {};
 
     // Calculate position values
@@ -119,6 +140,15 @@ export default function PortfolioPage() {
       const price = stock.price || 0;
       const positionValue = shares * price;
       totalValue += positionValue;
+
+      // Track asset allocation
+      if (isCashTicker(stock.ticker)) {
+        cashValue += positionValue;
+      } else if (isBondTicker(stock.ticker)) {
+        bondsValue += positionValue;
+      } else {
+        equitiesValue += positionValue;
+      }
 
       if (stock.change !== null) {
         totalGainLoss += shares * stock.change;
@@ -184,6 +214,13 @@ export default function PortfolioPage() {
     // Concentration score (0-30): lower max position = better
     diversificationScore += Math.max(0, 30 - maxPositionWeight);
 
+    // Calculate asset allocation percentages
+    const bondsCashValue = bondsValue + cashValue;
+    const equitiesPercent = totalValue > 0 ? (equitiesValue / totalValue) * 100 : 0;
+    const bondsPercent = totalValue > 0 ? (bondsValue / totalValue) * 100 : 0;
+    const cashPercent = totalValue > 0 ? (cashValue / totalValue) * 100 : 0;
+    const bondsCashPercent = totalValue > 0 ? (bondsCashValue / totalValue) * 100 : 0;
+
     return {
       totalValue,
       totalGainLoss,
@@ -195,6 +232,14 @@ export default function PortfolioPage() {
       averagePE: peCount > 0 ? peSum / peCount : 0,
       largestPosition,
       diversificationScore: Math.min(100, Math.max(0, diversificationScore)),
+      equitiesPercent,
+      equitiesValue,
+      bondsCashPercent,
+      bondsCashValue,
+      bondsPercent,
+      bondsValue,
+      cashPercent,
+      cashValue,
     };
   }, [portfolioData, positions]);
 
@@ -537,6 +582,104 @@ export default function PortfolioPage() {
               <div className="text-sm text-gray-500">
                 {portfolioStats.diversificationScore >= 70 ? 'Well diversified' : 
                  portfolioStats.diversificationScore >= 40 ? 'Moderate' : 'Concentrated'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Asset Allocation - Equities vs Bonds + Cash */}
+        {portfolioData.length > 0 && Object.values(positions).some(s => s > 0) && (
+          <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 mb-8">
+            <h3 className="text-lg font-semibold text-white mb-4">Asset Allocation</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Equities */}
+              <div className="bg-gray-800/50 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-violet-500" />
+                    <span className="text-gray-300 font-medium">Equities</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-white">{portfolioStats.equitiesPercent.toFixed(1)}%</span>
+                  </div>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-3 mb-2">
+                  <div 
+                    className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full transition-all duration-500"
+                    style={{ width: `${portfolioStats.equitiesPercent}%` }}
+                  />
+                </div>
+                <div className="text-sm text-gray-500">{formatCurrency(portfolioStats.equitiesValue)}</div>
+              </div>
+
+              {/* Bonds + Cash */}
+              <div className="bg-gray-800/50 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                    <span className="text-gray-300 font-medium">Bonds + Cash</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-bold text-white">{portfolioStats.bondsCashPercent.toFixed(1)}%</span>
+                  </div>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-3 mb-2">
+                  <div 
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full transition-all duration-500"
+                    style={{ width: `${portfolioStats.bondsCashPercent}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span>{formatCurrency(portfolioStats.bondsCashValue)}</span>
+                  {(portfolioStats.bondsPercent > 0 || portfolioStats.cashPercent > 0) && (
+                    <span className="text-gray-600">
+                      {portfolioStats.bondsPercent > 0 && `Bonds: ${portfolioStats.bondsPercent.toFixed(1)}%`}
+                      {portfolioStats.bondsPercent > 0 && portfolioStats.cashPercent > 0 && ' · '}
+                      {portfolioStats.cashPercent > 0 && `Cash: ${portfolioStats.cashPercent.toFixed(1)}%`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Full Allocation Bar */}
+            <div className="mt-4 pt-4 border-t border-gray-800">
+              <div className="flex items-center gap-1 h-4 rounded-full overflow-hidden bg-gray-800">
+                {portfolioStats.equitiesPercent > 0 && (
+                  <div 
+                    className="h-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-500"
+                    style={{ width: `${portfolioStats.equitiesPercent}%` }}
+                    title={`Equities: ${portfolioStats.equitiesPercent.toFixed(1)}%`}
+                  />
+                )}
+                {portfolioStats.bondsPercent > 0 && (
+                  <div 
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
+                    style={{ width: `${portfolioStats.bondsPercent}%` }}
+                    title={`Bonds: ${portfolioStats.bondsPercent.toFixed(1)}%`}
+                  />
+                )}
+                {portfolioStats.cashPercent > 0 && (
+                  <div 
+                    className="h-full bg-gradient-to-r from-amber-500 to-yellow-500 transition-all duration-500"
+                    style={{ width: `${portfolioStats.cashPercent}%` }}
+                    title={`Cash: ${portfolioStats.cashPercent.toFixed(1)}%`}
+                  />
+                )}
+              </div>
+              <div className="flex justify-center gap-6 mt-3 text-xs text-gray-500">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-violet-500" />
+                  <span>Equities</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span>Bonds</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <span>Cash</span>
+                </div>
               </div>
             </div>
           </div>

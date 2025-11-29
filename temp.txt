@@ -1,0 +1,18 @@
+In the AI portfolio part of the app, here's how it should work: It 
+should take in all the elements of the users profile: investment philosophy,
+ current portfolio and goals. Use knowledge level to know what level of 
+explanation to give them for your analysis. It should grab the current 
+market days market analysis as well. After ingesting all of this it should 
+spit out any changes of allocations recommended based on their investment 
+portfolio goals etc. It should consider macroeconomic factors to some degree
+ unless the users investment philosophy differs. Also in your analysis 
+include potential investment thesis based on the general themes of their 
+portfolio. For example, if they are really concentrated in an AI narrative, 
+try to find an uncorrelated secular trend that might be interesting. I 
+included a file called secular_trends.txt to get inspiration. Your 
+recommendations should comply with modern portfolio theory. 
+Secular_trends.txt is located in backend/secular_trends.txt. Use this file 
+as inspiration in finding new ideas. Your ideas should always include an 
+allocation recommendation. These allocation recommendations should be based 
+in a professional poker level understanding of bet size (kelly criterion 
+etc). It should be an allocation % that optimizes sharpe ratio. 

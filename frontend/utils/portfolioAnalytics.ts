@@ -86,6 +86,16 @@ export interface PortfolioAnalytics {
   totalCostBasis: number;
   totalGainLoss: number;
   
+  // Asset Allocation
+  equitiesPercent: number;
+  equitiesValue: number;
+  bondsCashPercent: number;
+  bondsCashValue: number;
+  bondsPercent: number;
+  bondsValue: number;
+  cashPercent: number;
+  cashValue: number;
+  
   // Additional context
   hasEnoughDataForRatios: boolean;
 }
@@ -288,13 +298,25 @@ export function calculatePortfolioAnalytics(
   // Filter out holdings with no price data
   const validHoldings = holdings.filter(h => h.currentPrice > 0 || h.isCash);
   
-  // Calculate basic totals
+  // Calculate basic totals and asset allocation
   let totalValue = 0;
   let totalCostBasis = 0;
+  let equitiesValue = 0;
+  let bondsValue = 0;
+  let cashValue = 0;
   
   validHoldings.forEach(h => {
     const value = h.shares * h.currentPrice;
     totalValue += value;
+    
+    // Track asset allocation
+    if (h.isCash || isCashTicker(h.ticker)) {
+      cashValue += value;
+    } else if (isBondTicker(h.ticker)) {
+      bondsValue += value;
+    } else {
+      equitiesValue += value;
+    }
     
     if (h.costBasis) {
       totalCostBasis += h.shares * (h.isCash ? 1 : h.costBasis);
@@ -358,6 +380,13 @@ export function calculatePortfolioAnalytics(
   // Calculate win/loss stats
   const winLossStats = calculateWinLossStats(validHoldings);
   
+  // Calculate asset allocation percentages
+  const bondsCashValue = bondsValue + cashValue;
+  const equitiesPercent = totalValue > 0 ? (equitiesValue / totalValue) * 100 : 0;
+  const bondsPercent = totalValue > 0 ? (bondsValue / totalValue) * 100 : 0;
+  const cashPercent = totalValue > 0 ? (cashValue / totalValue) * 100 : 0;
+  const bondsCashPercent = totalValue > 0 ? (bondsCashValue / totalValue) * 100 : 0;
+
   return {
     // Performance Metrics
     nominalPerformancePercent,
@@ -385,6 +414,16 @@ export function calculatePortfolioAnalytics(
     totalValue,
     totalCostBasis,
     totalGainLoss,
+    
+    // Asset Allocation
+    equitiesPercent,
+    equitiesValue,
+    bondsCashPercent,
+    bondsCashValue,
+    bondsPercent,
+    bondsValue,
+    cashPercent,
+    cashValue,
     
     // Context
     hasEnoughDataForRatios: hasEnoughData,
