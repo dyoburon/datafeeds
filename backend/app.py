@@ -22,7 +22,7 @@ from src.user_service import (
     get_user_context, update_user_context, get_user_holdings, add_holding,
     update_holding, delete_holding, replace_all_holdings, get_full_user_profile
 )
-from src.watchlist_service import get_watchlist_for_email, get_ticker_data
+from src.watchlist_service import get_watchlist_for_email, get_ticker_data, calculate_portfolio_max_drawdown
 from flask import request
 
 app = Flask(__name__)
@@ -556,6 +556,43 @@ def get_ticker_info(ticker):
     """Get info and news for a single ticker."""
     try:
         result = get_ticker_data(ticker.upper())
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/portfolio/max-drawdown', methods=['POST'])
+def get_portfolio_max_drawdown():
+    """
+    Calculate max drawdown for a portfolio using historical monthly data.
+    
+    Body: {
+        "holdings": [
+            {"ticker": "AAPL", "shares": 10, "isCash": false},
+            {"ticker": "CASH", "shares": 5000, "isCash": true}
+        ],
+        "months": 24  // optional, default 24
+    }
+    
+    Returns: {
+        "max_drawdown": 0.15,  // 15%
+        "peak_value": 50000,
+        "trough_value": 42500,
+        "peak_date": "2024-01-01",
+        "trough_date": "2024-03-01",
+        "monthly_values": [...]
+    }
+    """
+    try:
+        data = request.json
+        if not data or 'holdings' not in data:
+            return jsonify({"error": "Missing 'holdings' in request body"}), 400
+        
+        holdings = data['holdings']
+        months = data.get('months', 24)
+        
+        result = calculate_portfolio_max_drawdown(holdings, months)
+        
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
