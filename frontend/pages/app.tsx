@@ -15,8 +15,9 @@ export default function Home() {
     const { user, backendUser, isNewUser, signOut, isDevMode } = useAuth();
 
     useEffect(() => {
+        // Fetch insights when backendUser preferences are available
         fetchDailyInsights(false);
-    }, []);
+    }, [backendUser?.preferences]);
     
     // Show preferences modal for new users
     useEffect(() => {
@@ -29,10 +30,19 @@ export default function Home() {
         setInsightsLoading(true);
         setDailyInsights(null);
         try {
-            const url = forceReset 
-                ? 'http://localhost:5001/api/insights/daily?force_reset=true' 
-                : 'http://localhost:5001/api/insights/daily';
-            
+            // Build URL with user preferences if available
+            const params = new URLSearchParams();
+            if (forceReset) {
+                params.append('force_reset', 'true');
+            }
+            // Include user preferences to filter the response
+            if (backendUser?.preferences && backendUser.preferences.length > 0) {
+                params.append('preferences', backendUser.preferences.join(','));
+            }
+
+            const queryString = params.toString();
+            const url = `http://localhost:5001/api/insights/daily${queryString ? '?' + queryString : ''}`;
+
             const response = await axios.get(url);
             setDailyInsights(response.data);
             // Expand all questions by default
@@ -200,7 +210,9 @@ export default function Home() {
                                                 </span>
                                             )}
                                         </div>
-                                        <p className="text-gray-400 text-sm">{dailyInsights.data.summary}</p>
+                                        {dailyInsights.data.summary && (
+                                            <p className="text-gray-400 text-sm">{dailyInsights.data.summary}</p>
+                                        )}
                                     </div>
                                     <div className="bg-indigo-900/50 text-indigo-300 px-3 py-1 rounded-full text-sm font-bold border border-indigo-800 whitespace-nowrap">
                                         Score: {dailyInsights.data.intrigue_score}/100
@@ -217,6 +229,19 @@ export default function Home() {
                                                 </span>
                                             ))}
                                         </div>
+                                    </div>
+                                )}
+
+                                {/* Show message when no content sections are enabled */}
+                                {!dailyInsights.data.summary && !dailyInsights.data.top_news && !dailyInsights.data.questions && (
+                                    <div className="text-center py-8 border-t border-gray-700">
+                                        <p className="text-gray-400 text-sm mb-2">No content sections enabled for display.</p>
+                                        <button
+                                            onClick={() => setShowPreferences(true)}
+                                            className="text-indigo-400 hover:text-indigo-300 text-sm underline"
+                                        >
+                                            Update your preferences
+                                        </button>
                                     </div>
                                 )}
 

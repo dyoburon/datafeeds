@@ -192,40 +192,94 @@ def get_daily_insights():
         # Check for force_reset flag
         force_reset = request.args.get('force_reset', 'false').lower() == 'true'
 
+        # Get user preferences from query params (comma-separated list)
+        # e.g., ?preferences=quantitative_analysis,headlines,market_overview
+        preferences_param = request.args.get('preferences', '')
+        user_preferences = [p.strip() for p in preferences_param.split(',') if p.strip()] if preferences_param else None
+
         # CHANGED: Try to read from cache first
         cache_file = os.path.join(os.path.dirname(__file__), 'data', 'daily_analysis.json')
-        
+
         if not force_reset and os.path.exists(cache_file):
-            # You could add logic here to check file modification time 
+            # You could add logic here to check file modification time
             # and re-run if it's too old (e.g. > 24 hours)
             with open(cache_file, 'r') as f:
                 analysis = json.load(f)
+                # Filter data based on user preferences if provided
+                filtered_analysis = filter_analysis_by_preferences(analysis, user_preferences)
                 return jsonify({
                     "status": "success",
-                    "data": analysis,
-                    "source": "cache"
+                    "data": filtered_analysis,
+                    "source": "cache",
+                    "applied_preferences": user_preferences
                 })
-        
+
         # Fallback: Run generation if no cache exists
         analysis = run_daily_insight_generation()
-        
+
         # Filter logic (The "Gatekeeper")
         if analysis.get('intrigue_score', 0) < 70 and not force_reset:
+            filtered_analysis = filter_analysis_by_preferences(analysis, user_preferences)
             return jsonify({
                 "status": "skipped",
                 "message": "Today was not interesting enough (Score < 70)",
                 "score": analysis.get('intrigue_score'),
-                "data": analysis
+                "data": filtered_analysis,
+                "applied_preferences": user_preferences
             })
-            
+
+        # Filter data based on user preferences if provided
+        filtered_analysis = filter_analysis_by_preferences(analysis, user_preferences)
         return jsonify({
             "status": "success",
-            "data": analysis,
-            "source": "generated"
+            "data": filtered_analysis,
+            "source": "generated",
+            "applied_preferences": user_preferences
         })
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def filter_analysis_by_preferences(analysis: dict, preferences: list) -> dict:
+    """
+    Filter analysis data based on user preferences.
+
+    Preferences:
+    - quantitative_analysis: AI-generated questions with backtested results
+    - headlines: Top news headlines
+    - market_overview: Summary and intrigue score
+
+    If preferences is None or empty, return full analysis (for backwards compatibility).
+    """
+    if not preferences:
+        # No filtering - return full analysis
+        return analysis
+
+    filtered = {}
+
+    # Always include date and intrigue_score for context
+    if 'date' in analysis:
+        filtered['date'] = analysis['date']
+    if 'intrigue_score' in analysis:
+        filtered['intrigue_score'] = analysis['intrigue_score']
+
+    # market_overview includes summary
+    if 'market_overview' in preferences:
+        if 'summary' in analysis:
+            filtered['summary'] = analysis['summary']
+
+    # headlines includes top_news
+    if 'headlines' in preferences:
+        if 'top_news' in analysis:
+            filtered['top_news'] = analysis['top_news']
+
+    # quantitative_analysis includes questions with backtested results
+    if 'quantitative_analysis' in preferences:
+        if 'questions' in analysis:
+            filtered['questions'] = analysis['questions']
+
+    return filtered
 
 @app.route('/api/backtest/saved', methods=['GET'])
 def list_saved_queries():

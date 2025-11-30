@@ -233,10 +233,51 @@ def generate_watchlist_html(user: dict) -> str:
     return "".join(html_parts)
 
 
+def filter_email_data_by_preferences(data: dict, preferences: list) -> dict:
+    """
+    Filter daily analysis data based on user preferences for email content.
+
+    Preferences:
+    - quantitative_analysis: Include AI-generated questions with backtested results
+    - headlines: Include top news headlines
+    - market_overview: Include summary
+
+    Returns a filtered copy of the data.
+    """
+    if not preferences:
+        # No filtering - return full data
+        return data
+
+    filtered = {}
+
+    # Always include date and intrigue_score for context
+    if 'date' in data:
+        filtered['date'] = data['date']
+    if 'intrigue_score' in data:
+        filtered['intrigue_score'] = data['intrigue_score']
+
+    # market_overview includes summary
+    if 'market_overview' in preferences:
+        if 'summary' in data:
+            filtered['summary'] = data['summary']
+
+    # headlines includes top_news
+    if 'headlines' in preferences:
+        if 'top_news' in data:
+            filtered['top_news'] = data['top_news']
+
+    # quantitative_analysis includes questions with backtested results
+    if 'quantitative_analysis' in preferences:
+        if 'questions' in data:
+            filtered['questions'] = data['questions']
+
+    return filtered
+
+
 def send_daily_email_task():
     print("Email Service: Starting daily email task...")
-    
-    # 1. Load Daily Analysis
+
+    # 1. Load Daily Analysis (full data - filtering happens per-user)
     cache_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'daily_analysis.json')
     if not os.path.exists(cache_file):
         print("Email Service: No daily analysis file found. Aborting.")
@@ -244,7 +285,7 @@ def send_daily_email_task():
 
     try:
         with open(cache_file, 'r') as f:
-            data = json.load(f)
+            full_data = json.load(f)
     except Exception as e:
         print(f"Email Service: Failed to read analysis file: {e}")
         return
@@ -261,40 +302,124 @@ def send_daily_email_task():
 
     # Get recipients from user preferences
     subscribed_users = get_users_by_content_type(CONTENT_TYPE_ID)
-    
+
     # Fallback: Also check legacy EMAIL_RECIPIENT env var for backwards compatibility
     legacy_recipients = os.environ.get("EMAIL_RECIPIENT", "")
     legacy_emails = [r.strip() for r in legacy_recipients.split(',') if r.strip()]
-    
+
     # Combine user service emails with legacy emails (dedup)
     all_emails = set(u['email'] for u in subscribed_users)
     all_emails.update(legacy_emails)
     recipients = list(all_emails)
-    
+
     if not recipients:
         print("Email Service: No valid recipients found. Add users via the API or set EMAIL_RECIPIENT env var.")
         return
-    
+
     print(f"Email Service: Found {len(recipients)} recipients for content type '{CONTENT_TYPE_ID}'")
 
-    # 3. Prepare Email Content
+    # 3. Common email data
     date_str = datetime.now().strftime("%B %d, %Y")
-    score = data.get('intrigue_score', 0)
-    
+    score = full_data.get('intrigue_score', 0)
+
+    # Pre-generate chart images for all questions (will only be included if user has quantitative_analysis pref)
+    questions = full_data.get('questions', [])
+    images_to_attach = []
+
+    for i, q in enumerate(questions):
+        if 'results' in q and isinstance(q['results'], dict):
+            stats_data = q['results'].get('results', {})
+            control_data = q['results'].get('control', {})
+            chart_img_data = generate_chart_image(stats_data, control_data)
+            if chart_img_data:
+                images_to_attach.append((f"chart_{i}", chart_img_data))
+
+    # 4. Send personalized emails to each user
+    try:
+        print("Email Service: Connecting to SMTP server...")
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+
+            emails_sent = 0
+
+            # Create a map of emails to user data for personalization
+            user_map = {u['email']: u for u in subscribed_users}
+
+            for recipient_email in recipients:
+                # Get user data if available
+                user_data = user_map.get(recipient_email)
+                user_preferences = user_data.get('preferences', []) if user_data else []
+
+                # Filter data based on user preferences
+                # If no preferences, show everything (backwards compatibility for legacy recipients)
+                filtered_data = filter_email_data_by_preferences(full_data, user_preferences) if user_preferences else full_data
+
+                # Build personalized HTML for this user
+                full_html, user_images = build_email_html_for_user(
+                    filtered_data,
+                    date_str,
+                    score,
+                    user_data,
+                    images_to_attach,
+                    user_preferences
+                )
+
+                # Build Message
+                msg = MIMEMultipart('related')
+                msg['Subject'] = f"Daily Market Insights: {date_str} (Score: {score})"
+                msg['From'] = sender_email
+                msg['To'] = recipient_email
+
+                # Attach HTML
+                msg_alternative = MIMEMultipart('alternative')
+                msg.attach(msg_alternative)
+                msg_alternative.attach(MIMEText(full_html, 'html'))
+
+                # Attach Images with Content-IDs (only those used in this user's email)
+                for cid, img_data in user_images:
+                    img = MIMEImage(img_data)
+                    img.add_header('Content-ID', f'<{cid}>')
+                    img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
+                    msg.attach(img)
+
+                # Send to this recipient
+                server.send_message(msg)
+                emails_sent += 1
+
+                prefs_str = ', '.join(user_preferences) if user_preferences else 'all (default)'
+                print(f"Email Service: Sent personalized email to {recipient_email} (prefs: {prefs_str})")
+
+            print(f"Email Service: Successfully sent {emails_sent} emails.")
+            return {"status": "success", "message": f"Sent {emails_sent} emails"}
+
+    except Exception as e:
+        print(f"Email Service: Failed to send email: {e}")
+        return {"error": str(e)}
+
+
+def build_email_html_for_user(data: dict, date_str: str, score: int, user_data: dict, all_images: list, preferences: list) -> tuple:
+    """
+    Build personalized HTML email content based on user preferences.
+
+    Returns: (html_string, list_of_images_to_attach)
+    """
+    html_parts = []
+    used_images = []
+
     # Header Color Logic
-    header_bg = "#1e40af" # Blue default
+    header_bg = "#1e40af"  # Blue default
     score_text = "Today's market conditions show interesting patterns worth monitoring."
-    if score >= 80: 
-        header_bg = "#065f46" # Green
+    if score >= 80:
+        header_bg = "#065f46"  # Green
         score_text = "Market conditions today are statistically highly significant, suggesting strong potential for future price action."
-    elif score < 50: 
-        header_bg = "#4b5563" # Gray
+    elif score < 50:
+        header_bg = "#4b5563"  # Gray
         score_text = "Today's market activity was largely noise with few statistically significant historical parallels."
     elif score >= 60:
         score_text = "Today shows some moderate historical patterns that may offer actionable insights."
 
     # Start HTML
-    html_parts = []
     html_parts.append(f"""
     <html>
     <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #1f2937; background-color: #f3f4f6; margin: 0; padding: 20px;">
@@ -310,12 +435,20 @@ def send_daily_email_task():
                     {score_text}
                 </div>
             </div>
-            
+    """)
+
+    # Summary section (market_overview preference)
+    if data.get('summary'):
+        html_parts.append(f"""
             <!-- Summary -->
             <div style="padding: 24px;">
-                <p style="font-size: 16px; line-height: 1.6; margin-top: 0;">{data.get('summary', 'No summary available.')}</p>
+                <p style="font-size: 16px; line-height: 1.6; margin-top: 0;">{data.get('summary')}</p>
             </div>
-            
+        """)
+
+    # Headlines section (headlines preference)
+    if data.get('top_news'):
+        html_parts.append(f"""
             <!-- Headlines -->
             <div style="background-color: #f9fafb; padding: 24px; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;">
                 <h3 style="margin: 0 0 16px 0; color: #4b5563; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Top Headlines</h3>
@@ -323,159 +456,152 @@ def send_daily_email_task():
                     {''.join(f'<li style="margin-bottom: 8px;">{h}</li>' for h in data.get('top_news', []))}
                 </ul>
             </div>
-            
+        """)
+
+    # Questions & Analysis section (quantitative_analysis preference)
+    questions = data.get('questions', [])
+    if questions:
+        html_parts.append("""
             <!-- Questions & Analysis -->
             <div style="padding: 24px;">
                 <h3 style="margin: 0 0 20px 0; color: #111827; font-size: 20px;">Key Insights</h3>
-    """)
-
-    # Prepare images mapping
-    # We need to generate images and attach them
-    # cid_map stores { 'question_index': 'cid_string' }
-    cid_map = {}
-    images_to_attach = []
-
-    questions = data.get('questions', [])
-    for i, q in enumerate(questions):
-        q_text = q.get('question', 'Unknown Question')
-        insight = q.get('insight_explanation', '')
-        result_explanation = q.get('result_explanation', '')
-        
-        # Results Data
-        # Backend saves it as q['results'] -> { 'results': ..., 'control': ... }
-        # Wait, services.py saves: q_obj['results'] = test_result
-        # test_result has keys: results, control, signals
-        # So we access q['results']['results'] and q['results']['control']
-        
-        stats_data = {}
-        control_data = {}
-        has_results = False
-        
-        if 'results' in q and isinstance(q['results'], dict):
-             stats_data = q['results'].get('results', {})
-             control_data = q['results'].get('control', {})
-             has_results = True
-        
-        count = stats_data.get('count', 0)
-        
-        # Generate Chart
-        chart_cid = f"chart_{i}"
-        chart_img_data = None
-        if has_results:
-            chart_img_data = generate_chart_image(stats_data, control_data)
-            
-        if chart_img_data:
-            cid_map[i] = chart_cid
-            images_to_attach.append((chart_cid, chart_img_data))
-        
-        # HTML for this Question Card
-        html_parts.append(f"""
-        <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 24px; overflow: hidden;">
-            <div style="background-color: #f8fafc; padding: 16px; border-bottom: 1px solid #e5e7eb;">
-                <h4 style="margin: 0; color: #1e40af; font-size: 16px;">{q_text}</h4>
-                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Based on {count} historical occurrences</div>
-            </div>
-            
-            <div style="padding: 16px;">
-                <!-- Insight -->
-                <div style="margin-bottom: 16px; font-size: 14px; color: #4b5563; font-style: italic; border-left: 3px solid #3b82f6; padding-left: 12px;">
-                    "{insight}"
-                </div>
-                
-                <!-- Result Interpretation -->
-                <div style="margin-bottom: 16px; font-size: 14px; color: #1f2937;">
-                    <strong>Verdict:</strong> {result_explanation}
-                </div>
         """)
-        
-        # Add Chart if available
-        if chart_img_data:
+
+        for i, q in enumerate(questions):
+            q_text = q.get('question', 'Unknown Question')
+            insight = q.get('insight_explanation', '')
+            result_explanation = q.get('result_explanation', '')
+
+            stats_data = {}
+            control_data = {}
+            has_results = False
+
+            if 'results' in q and isinstance(q['results'], dict):
+                stats_data = q['results'].get('results', {})
+                control_data = q['results'].get('control', {})
+                has_results = True
+
+            count = stats_data.get('count', 0)
+
+            # Check if we have a chart image for this question
+            chart_cid = f"chart_{i}"
+            chart_img_data = None
+            for cid, img_data in all_images:
+                if cid == chart_cid:
+                    chart_img_data = img_data
+                    used_images.append((cid, img_data))
+                    break
+
+            # HTML for this Question Card
             html_parts.append(f"""
-                <div style="text-align: center; margin: 20px 0;">
-                    <img src="cid:{chart_cid}" style="max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #e5e7eb;" alt="Performance Chart">
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 24px; overflow: hidden;">
+                <div style="background-color: #f8fafc; padding: 16px; border-bottom: 1px solid #e5e7eb;">
+                    <h4 style="margin: 0; color: #1e40af; font-size: 16px;">{q_text}</h4>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Based on {count} historical occurrences</div>
                 </div>
+
+                <div style="padding: 16px;">
+                    <!-- Insight -->
+                    <div style="margin-bottom: 16px; font-size: 14px; color: #4b5563; font-style: italic; border-left: 3px solid #3b82f6; padding-left: 12px;">
+                        "{insight}"
+                    </div>
+
+                    <!-- Result Interpretation -->
+                    <div style="margin-bottom: 16px; font-size: 14px; color: #1f2937;">
+                        <strong>Verdict:</strong> {result_explanation}
+                    </div>
             """)
-            
-        # Stats Table
-        if has_results:
-            # Extract periods
-            periods = [k for k in stats_data.keys() if k != 'count' and k in stats_data and isinstance(stats_data[k], dict)]
-            order = ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']
-            periods = sorted(periods, key=lambda x: order.index(x) if x in order else 999)
-            
-            html_parts.append("""
-                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px;">
-                    <tr style="background-color: #f3f4f6; color: #4b5563;">
-                        <th style="padding: 8px; text-align: left;">Period</th>
-                        <th style="padding: 8px; text-align: right;">Signal Mean</th>
-                        <th style="padding: 8px; text-align: right;">Baseline</th>
-                        <th style="padding: 8px; text-align: right;">Win Rate</th>
-                    </tr>
-            """)
-            
-            for p in periods:
-                s_mean = stats_data[p]['mean']
-                b_mean = control_data[p]['mean'] if p in control_data and isinstance(control_data[p], dict) else 0
-                win_rate = stats_data[p]['win_rate']
-                
-                # Color code signal
-                color = "#059669" if s_mean > 0 else "#dc2626" # Green/Red
-                
+
+            # Add Chart if available
+            if chart_img_data:
                 html_parts.append(f"""
-                    <tr style="border-bottom: 1px solid #f3f4f6;">
-                        <td style="padding: 8px; font-weight: 600; color: #374151;">{p}</td>
-                        <td style="padding: 8px; text-align: right; font-weight: 700; color: {color};">{format_percentage(s_mean)}</td>
-                        <td style="padding: 8px; text-align: right; color: #6b7280;">{format_percentage(b_mean)}</td>
-                        <td style="padding: 8px; text-align: right; color: #374151;">{format_percentage(win_rate)}</td>
-                    </tr>
+                    <div style="text-align: center; margin: 20px 0;">
+                        <img src="cid:{chart_cid}" style="max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #e5e7eb;" alt="Performance Chart">
+                    </div>
                 """)
-            
-            html_parts.append("</table>")
 
-        html_parts.append("""
+            # Stats Table
+            if has_results:
+                periods = [k for k in stats_data.keys() if k != 'count' and k in stats_data and isinstance(stats_data[k], dict)]
+                order = ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y']
+                periods = sorted(periods, key=lambda x: order.index(x) if x in order else 999)
+
+                html_parts.append("""
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px;">
+                        <tr style="background-color: #f3f4f6; color: #4b5563;">
+                            <th style="padding: 8px; text-align: left;">Period</th>
+                            <th style="padding: 8px; text-align: right;">Signal Mean</th>
+                            <th style="padding: 8px; text-align: right;">Baseline</th>
+                            <th style="padding: 8px; text-align: right;">Win Rate</th>
+                        </tr>
+                """)
+
+                for p in periods:
+                    s_mean = stats_data[p]['mean']
+                    b_mean = control_data[p]['mean'] if p in control_data and isinstance(control_data[p], dict) else 0
+                    win_rate = stats_data[p]['win_rate']
+                    color = "#059669" if s_mean > 0 else "#dc2626"
+
+                    html_parts.append(f"""
+                        <tr style="border-bottom: 1px solid #f3f4f6;">
+                            <td style="padding: 8px; font-weight: 600; color: #374151;">{p}</td>
+                            <td style="padding: 8px; text-align: right; font-weight: 700; color: {color};">{format_percentage(s_mean)}</td>
+                            <td style="padding: 8px; text-align: right; color: #6b7280;">{format_percentage(b_mean)}</td>
+                            <td style="padding: 8px; text-align: right; color: #374151;">{format_percentage(win_rate)}</td>
+                        </tr>
+                    """)
+
+                html_parts.append("</table>")
+
+            html_parts.append("""
+                </div>
             </div>
-        </div>
-        """)
+            """)
 
-    # Glossary Section - gather terms used in content
+        html_parts.append("</div>")  # Close Questions & Analysis section
+
+    # Watchlist section (watchlist_news preference)
+    if user_data:
+        try:
+            watchlist_html = generate_watchlist_html(user_data)
+            if watchlist_html:
+                html_parts.append(watchlist_html)
+        except Exception as e:
+            print(f"Email Service: Error generating watchlist: {e}")
+
+    # Glossary Section - gather terms used in the filtered content
     all_text = (
-        data.get('summary', '') + " " + 
-        " ".join(data.get('top_news', [])) + " " + 
+        data.get('summary', '') + " " +
+        " ".join(data.get('top_news', [])) + " " +
         " ".join([q.get('question', '') + " " + q.get('insight_explanation', '') + " " + q.get('result_explanation', '') for q in questions])
     ).lower()
-    
+
     used_terms = []
     for term, definition in GLOSSARY.items():
         if term.lower() in all_text:
             used_terms.append((term, definition))
 
-    # Store the base HTML parts (before personalized content)
-    base_html = "".join(html_parts)
-    
-    # Glossary HTML (will be included in all emails)
-    glossary_html_parts = []
     if used_terms:
-        glossary_html_parts.append("""
+        html_parts.append("""
             <div style="padding: 24px; border-top: 1px solid #e5e7eb;">
                 <h3 style="margin: 0 0 16px 0; color: #4b5563; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Glossary of Terms</h3>
                 <div style="font-size: 13px; color: #4b5563;">
         """)
-        
+
         for term, definition in used_terms:
-            glossary_html_parts.append(f"""
+            html_parts.append(f"""
                 <div style="margin-bottom: 12px;">
                     <strong style="color: #1f2937;">{term}:</strong> {definition}
                 </div>
             """)
-            
-        glossary_html_parts.append("""
+
+        html_parts.append("""
                 </div>
             </div>
         """)
-    glossary_html = "".join(glossary_html_parts)
-    
+
     # Footer HTML
-    footer_html = """
+    html_parts.append("""
             </div>
             <div style="background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 12px; border-top: 1px solid #e5e7eb;">
                 Automated Daily Market Analysis System
@@ -483,68 +609,9 @@ def send_daily_email_task():
         </div>
     </body>
     </html>
-    """
+    """)
 
-    # 4. Send personalized emails to each user
-    try:
-        print("Email Service: Connecting to SMTP server...")
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            
-            emails_sent = 0
-            
-            # Create a map of emails to user data for personalization
-            user_map = {u['email']: u for u in subscribed_users}
-            
-            for recipient_email in recipients:
-                # Get user data if available
-                user_data = user_map.get(recipient_email)
-                
-                # Generate personalized watchlist section
-                watchlist_html = ""
-                if user_data:
-                    try:
-                        watchlist_html = generate_watchlist_html(user_data)
-                    except Exception as e:
-                        print(f"Email Service: Error generating watchlist for {recipient_email}: {e}")
-                
-                # Build full HTML for this user
-                full_html = base_html + watchlist_html + glossary_html + footer_html
-                
-                # Build Message
-                msg = MIMEMultipart('related')
-                msg['Subject'] = f"Daily Market Insights: {date_str} (Score: {score})"
-                msg['From'] = sender_email
-                msg['To'] = recipient_email
-
-                # Attach HTML
-                msg_alternative = MIMEMultipart('alternative')
-                msg.attach(msg_alternative)
-                msg_alternative.attach(MIMEText(full_html, 'html'))
-
-                # Attach Images with Content-IDs
-                for cid, img_data in images_to_attach:
-                    img = MIMEImage(img_data)
-                    img.add_header('Content-ID', f'<{cid}>')
-                    img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
-                    msg.attach(img)
-                
-                # Send to this recipient
-                server.send_message(msg)
-                emails_sent += 1
-                
-                if watchlist_html:
-                    print(f"Email Service: Sent personalized email with watchlist to {recipient_email}")
-                else:
-                    print(f"Email Service: Sent email to {recipient_email}")
-            
-            print(f"Email Service: Successfully sent {emails_sent} emails.")
-            return {"status": "success", "message": f"Sent {emails_sent} emails"}
-            
-    except Exception as e:
-        print(f"Email Service: Failed to send email: {e}")
-        return {"error": str(e)}
+    return "".join(html_parts), used_images
 
 if __name__ == "__main__":
     # Quick test if run directly
