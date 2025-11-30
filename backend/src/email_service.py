@@ -11,8 +11,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from datetime import datetime
 from dotenv import load_dotenv
-from .user_service import get_users_by_content_type, get_user_by_id
-from .watchlist_service import get_watchlist_for_email
+from .user_service import (
+    get_users_by_content_type, get_user_by_id, get_user_holdings,
+    get_cached_portfolio_news, save_cached_portfolio_news, should_refresh_portfolio_news
+)
+from .watchlist_service import get_watchlist_for_email, get_ticker_data
 
 # Load env vars if not already loaded
 load_dotenv()
@@ -229,7 +232,292 @@ def generate_watchlist_html(user: dict) -> str:
         """)
     
     html_parts.append("</div>")
-    
+
+    return "".join(html_parts)
+
+
+def get_portfolio_news_for_email(user_id: str, max_stocks: int = 3) -> list:
+    """
+    Get portfolio news for a user, using cache if available or generating if needed.
+    Returns the top N most interesting stocks (by news count + price movement).
+
+    Args:
+        user_id: The user's ID
+        max_stocks: Maximum number of stocks to include (default 3)
+
+    Returns:
+        List of stock dicts with news and analysis, sorted by interestingness
+    """
+    import concurrent.futures
+
+    # Check if user has holdings
+    holdings_result = get_user_holdings(user_id)
+    if 'error' in holdings_result:
+        return []
+
+    holdings = holdings_result.get('holdings', [])
+    if not holdings:
+        return []
+
+    # Get unique tickers (exclude cash)
+    tickers = list(set([
+        h['ticker'] for h in holdings
+        if h['ticker'].upper() not in ['CASH', '$CASH']
+    ]))
+
+    if not tickers:
+        return []
+
+    # Check cache first
+    refresh_check = should_refresh_portfolio_news(user_id)
+
+    if not refresh_check.get('should_refresh') and refresh_check.get('cached_news'):
+        cached = refresh_check['cached_news']
+        stocks = cached['news'].get('stocks', [])
+        # Return top N most interesting from cache
+        return get_top_interesting_stocks(stocks, max_stocks)
+
+    # Need to generate - fetch data for all tickers
+    try:
+        from .llm_service import LLMService
+        llm_service = LLMService()
+    except Exception as e:
+        print(f"Email Service: Could not initialize LLM service: {e}")
+        return []
+
+    stock_data = []
+
+    # Fetch data in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ticker = {
+            executor.submit(get_ticker_data, ticker): ticker
+            for ticker in tickers
+        }
+
+        for future in concurrent.futures.as_completed(future_to_ticker):
+            try:
+                data = future.result()
+                stock_data.append(data)
+            except Exception as e:
+                ticker = future_to_ticker[future]
+                stock_data.append({
+                    "ticker": ticker,
+                    "name": ticker,
+                    "error": str(e)
+                })
+
+    # Analyze news for each stock with AI
+    analyzed_stocks = []
+
+    for stock in stock_data:
+        ticker = stock.get('ticker', '')
+        company_name = stock.get('name', ticker)
+        news = stock.get('news', [])
+        perf = stock.get('performance', {})
+
+        # Get top 3 headlines
+        headlines = [n.get('title', '') for n in news[:3] if n.get('title')]
+
+        # Get price data
+        price_data = {
+            'price': perf.get('current_price'),
+            'change': perf.get('change'),
+            'change_percent': perf.get('change_percent')
+        }
+
+        # Analyze with AI
+        try:
+            analysis = llm_service.analyze_stock_news(
+                ticker=ticker,
+                company_name=company_name,
+                headlines=headlines,
+                price_data=price_data
+            )
+        except Exception as e:
+            print(f"Email Service: Error analyzing {ticker}: {e}")
+            analysis = {'summary': '', 'sentiment': 'neutral', 'key_themes': []}
+
+        analyzed_stocks.append({
+            "ticker": ticker,
+            "company_name": company_name,
+            "sector": stock.get('sector', 'Unknown'),
+            "price": price_data.get('price'),
+            "change": price_data.get('change'),
+            "change_percent": price_data.get('change_percent'),
+            "headlines": headlines,
+            "news_count": len(news),
+            "analysis": {
+                "summary": analysis.get('summary', ''),
+                "sentiment": analysis.get('sentiment', 'neutral'),
+                "key_themes": analysis.get('key_themes', []),
+                "price_context": analysis.get('price_context', ''),
+                "notable_headline": analysis.get('notable_headline', '')
+            },
+            "error": stock.get('error') or analysis.get('error')
+        })
+
+    # Save to cache
+    news_data = {
+        "stocks": analyzed_stocks,
+        "count": len(analyzed_stocks)
+    }
+    save_cached_portfolio_news(user_id, news_data)
+
+    # Return top N most interesting
+    return get_top_interesting_stocks(analyzed_stocks, max_stocks)
+
+
+def get_top_interesting_stocks(stocks: list, max_stocks: int = 3) -> list:
+    """
+    Sort stocks by "interestingness" and return the top N.
+
+    Interestingness is determined by:
+    1. News count (more news = more interesting)
+    2. Absolute price change (bigger moves = more interesting)
+    3. Sentiment extremes (very positive or very negative)
+    """
+    def interestingness_score(stock):
+        score = 0
+
+        # News count (0-10 points)
+        news_count = stock.get('news_count', 0)
+        score += min(news_count * 2, 10)
+
+        # Absolute price change (0-10 points)
+        change_pct = abs(stock.get('change_percent', 0) or 0)
+        score += min(change_pct * 2, 10)
+
+        # Sentiment extremes (0-5 points)
+        sentiment = stock.get('analysis', {}).get('sentiment', 'neutral')
+        if sentiment in ['very_positive', 'very_negative']:
+            score += 5
+        elif sentiment in ['positive', 'negative']:
+            score += 3
+
+        # Has AI summary (2 points)
+        if stock.get('analysis', {}).get('summary'):
+            score += 2
+
+        return score
+
+    # Sort by interestingness score descending
+    sorted_stocks = sorted(stocks, key=interestingness_score, reverse=True)
+
+    return sorted_stocks[:max_stocks]
+
+
+def generate_portfolio_news_html(user_id: str, preferences: list) -> str:
+    """
+    Generate HTML section for portfolio news in email.
+    Returns empty string if user doesn't have portfolio_news preference or no portfolio.
+    """
+    # Check if user has portfolio_news preference
+    if 'portfolio_news' not in preferences:
+        return ""
+
+    # Get top 3 interesting stocks
+    stocks = get_portfolio_news_for_email(user_id, max_stocks=3)
+
+    if not stocks:
+        return ""
+
+    html_parts = []
+    html_parts.append("""
+        <div style="margin: 24px 0; border-top: 2px solid #e5e7eb; padding-top: 24px;">
+            <h3 style="margin: 0 0 16px 0; color: #111827; font-size: 20px;">
+                📈 Portfolio Highlights
+            </h3>
+            <p style="font-size: 12px; color: #6b7280; margin-bottom: 16px;">
+                Top movers and news from your portfolio
+            </p>
+    """)
+
+    for stock in stocks:
+        ticker = stock.get('ticker', '')
+        company_name = stock.get('company_name', ticker)
+        price = stock.get('price')
+        change_pct = stock.get('change_percent')
+        headlines = stock.get('headlines', [])
+        analysis = stock.get('analysis', {})
+
+        # Determine color based on performance
+        if change_pct is not None:
+            if change_pct > 0:
+                perf_color = "#059669"  # Green
+                perf_bg = "#d1fae5"
+                arrow = "▲"
+            elif change_pct < 0:
+                perf_color = "#dc2626"  # Red
+                perf_bg = "#fee2e2"
+                arrow = "▼"
+            else:
+                perf_color = "#6b7280"  # Gray
+                perf_bg = "#f3f4f6"
+                arrow = "–"
+            perf_text = f"{arrow} {'+' if change_pct > 0 else ''}{change_pct:.2f}%"
+        else:
+            perf_color = "#6b7280"
+            perf_bg = "#f3f4f6"
+            perf_text = "N/A"
+
+        price_text = f"${price:.2f}" if price else "N/A"
+
+        # Sentiment badge
+        sentiment = analysis.get('sentiment', 'neutral')
+        sentiment_colors = {
+            'very_positive': ('#065f46', '#d1fae5', '🚀'),
+            'positive': ('#059669', '#d1fae5', '📈'),
+            'neutral': ('#6b7280', '#f3f4f6', '➡️'),
+            'negative': ('#dc2626', '#fee2e2', '📉'),
+            'very_negative': ('#991b1b', '#fee2e2', '⚠️')
+        }
+        sent_color, sent_bg, sent_emoji = sentiment_colors.get(sentiment, sentiment_colors['neutral'])
+
+        html_parts.append(f"""
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; overflow: hidden;">
+                <div style="padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; background-color: #f8fafc; border-bottom: 1px solid #e5e7eb;">
+                    <div>
+                        <span style="font-weight: 700; color: #111827; font-size: 16px;">{ticker}</span>
+                        <span style="color: #6b7280; font-size: 13px; margin-left: 8px;">{company_name}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span style="font-weight: 600; color: #374151; font-size: 15px;">{price_text}</span>
+                        <span style="margin-left: 8px; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 13px; background-color: {perf_bg}; color: {perf_color};">
+                            {perf_text}
+                        </span>
+                    </div>
+                </div>
+                <div style="padding: 12px 16px;">
+        """)
+
+        # AI Summary
+        summary = analysis.get('summary', '')
+        if summary:
+            html_parts.append(f"""
+                    <div style="margin-bottom: 12px; padding: 10px; background-color: #f9fafb; border-radius: 6px; border-left: 3px solid {sent_color};">
+                        <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">{sent_emoji} AI Analysis</div>
+                        <p style="margin: 0; font-size: 13px; color: #374151; line-height: 1.5;">{summary}</p>
+                    </div>
+            """)
+
+        # Headlines
+        if headlines:
+            html_parts.append("""
+                    <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Recent Headlines</div>
+                    <ul style="margin: 0; padding-left: 16px; color: #374151; font-size: 13px;">
+            """)
+            for h in headlines[:2]:  # Show max 2 headlines in email
+                headline = h[:80] + "..." if len(h) > 80 else h
+                html_parts.append(f'<li style="margin-bottom: 4px;">{headline}</li>')
+            html_parts.append("</ul>")
+
+        html_parts.append("""
+                </div>
+            </div>
+        """)
+
+    html_parts.append("</div>")
+
     return "".join(html_parts)
 
 
@@ -568,6 +856,15 @@ def build_email_html_for_user(data: dict, date_str: str, score: int, user_data: 
                 html_parts.append(watchlist_html)
         except Exception as e:
             print(f"Email Service: Error generating watchlist: {e}")
+
+    # Portfolio news section (portfolio_news preference)
+    if user_data and user_data.get('id'):
+        try:
+            portfolio_news_html = generate_portfolio_news_html(user_data['id'], preferences)
+            if portfolio_news_html:
+                html_parts.append(portfolio_news_html)
+        except Exception as e:
+            print(f"Email Service: Error generating portfolio news: {e}")
 
     # Glossary Section - gather terms used in the filtered content
     all_text = (
