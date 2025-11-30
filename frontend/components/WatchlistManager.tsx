@@ -277,3 +277,4 @@ export default function WatchlistManager({ isOpen, onClose }: WatchlistManagerPr
   );
 }
 
+
