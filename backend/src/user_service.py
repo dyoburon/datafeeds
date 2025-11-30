@@ -44,6 +44,12 @@ CONTENT_TYPES = {
         "description": "Daily news and performance updates for stocks in your personal watchlist.",
         "enabled": True
     },
+    "portfolio_news": {
+        "id": "portfolio_news",
+        "name": "Portfolio News",
+        "description": "AI-analyzed news and price movements for your top portfolio holdings.",
+        "enabled": True
+    },
 }
 
 
