@@ -64,19 +64,60 @@ def get_ticker_data(ticker: str) -> Dict:
         performance["fifty_two_week_high"] = info.get("fiftyTwoWeekHigh")
         performance["fifty_two_week_low"] = info.get("fiftyTwoWeekLow")
         
-        # Get news
-        news = stock.news or []
+        # Get news - handle different yfinance versions
+        news = []
+        try:
+            raw_news = stock.news
+            if raw_news:
+                news = raw_news if isinstance(raw_news, list) else []
+        except Exception as news_err:
+            print(f"News fetch warning for {ticker}: {news_err}")
+            news = []
         
-        # Process news - extract relevant fields
+        # Process news - extract relevant fields with flexible field mapping
         processed_news = []
         for article in news[:10]:  # Limit to 10 most recent
-            processed_news.append({
-                "title": article.get("title", ""),
-                "publisher": article.get("publisher", ""),
-                "link": article.get("link", ""),
-                "published": article.get("providerPublishTime", 0),
-                "type": article.get("type", ""),
-            })
+            if not isinstance(article, dict):
+                continue
+            
+            # Try multiple field names for title (yfinance versions vary)
+            title = (
+                article.get("title") or 
+                article.get("headline") or 
+                article.get("content", {}).get("title") if isinstance(article.get("content"), dict) else None or
+                ""
+            )
+            
+            # Try multiple field names for other fields
+            publisher = (
+                article.get("publisher") or 
+                article.get("source") or
+                article.get("provider") or
+                ""
+            )
+            
+            link = (
+                article.get("link") or 
+                article.get("url") or
+                article.get("canonicalUrl", {}).get("url") if isinstance(article.get("canonicalUrl"), dict) else None or
+                ""
+            )
+            
+            published = (
+                article.get("providerPublishTime") or 
+                article.get("publishTime") or
+                article.get("pubDate") or
+                0
+            )
+            
+            if title:  # Only add if we have a title
+                processed_news.append({
+                    "title": title,
+                    "publisher": publisher,
+                    "link": link,
+                    "published": published,
+                    "type": article.get("type", ""),
+                })
         
         return {
             "ticker": ticker,

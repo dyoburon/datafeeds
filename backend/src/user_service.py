@@ -154,6 +154,16 @@ def _init_db():
             )
         ''')
         
+        # Cached portfolio news table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_portfolio_news (
+                user_id TEXT PRIMARY KEY,
+                news_json TEXT DEFAULT '{}',
+                generated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        
         conn.commit()
 
 
@@ -1367,4 +1377,131 @@ def should_regenerate_analysis(user_id: str, cooldown_minutes: int = 5) -> Dict:
         "should_regenerate": True,
         "reason": "profile_changed",
         "cached_analysis": cached
+    }
+
+
+# ============== PORTFOLIO NEWS CACHING ==============
+
+def get_cached_portfolio_news(user_id: str) -> Optional[Dict]:
+    """
+    Get cached portfolio news for a user.
+    
+    Returns:
+        Dict with news data and generated_at, or None if no cache exists
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return None
+    
+    with _get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT news_json, generated_at FROM user_portfolio_news WHERE user_id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        
+        if not row:
+            return None
+        
+        try:
+            news_data = json.loads(row["news_json"]) if row["news_json"] else None
+        except:
+            news_data = None
+        
+        return {
+            "news": news_data,
+            "generated_at": row["generated_at"]
+        }
+
+
+def save_cached_portfolio_news(user_id: str, news_data: Dict) -> Dict:
+    """
+    Save portfolio news to cache.
+    """
+    import json
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    
+    now = datetime.now().isoformat()
+    news_json = json.dumps(news_data)
+    
+    try:
+        with _get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Upsert the news
+            cursor.execute('''
+                INSERT INTO user_portfolio_news (user_id, news_json, generated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    news_json = excluded.news_json,
+                    generated_at = excluded.generated_at
+            ''', (user_id, news_json, now))
+            
+            conn.commit()
+            
+            return {
+                "success": True,
+                "generated_at": now
+            }
+            
+    except Exception as e:
+        return {"error": f"Failed to save portfolio news: {str(e)}"}
+
+
+def should_refresh_portfolio_news(user_id: str) -> Dict:
+    """
+    Check if portfolio news should be refreshed.
+    
+    News should be refreshed if:
+    1. No cached news exists
+    2. Cache is older than 24 hours
+    
+    Returns:
+        Dict with should_refresh, reason, hours_since_refresh, and cached news if available
+    """
+    cached = get_cached_portfolio_news(user_id)
+    
+    if cached is None or cached.get('news') is None:
+        return {
+            "should_refresh": True,
+            "reason": "no_cache",
+            "cached_news": None,
+            "hours_since_refresh": None
+        }
+    
+    generated_at = cached.get('generated_at')
+    if generated_at:
+        try:
+            gen_time = datetime.fromisoformat(generated_at)
+            hours_elapsed = (datetime.now() - gen_time).total_seconds() / 3600
+            
+            if hours_elapsed >= 24:
+                return {
+                    "should_refresh": True,
+                    "reason": "stale",
+                    "hours_since_refresh": round(hours_elapsed, 1),
+                    "cached_news": cached
+                }
+            
+            return {
+                "should_refresh": False,
+                "reason": "fresh",
+                "hours_since_refresh": round(hours_elapsed, 1),
+                "cached_news": cached
+            }
+        except:
+            pass
+    
+    # If we can't determine age, assume stale
+    return {
+        "should_refresh": True,
+        "reason": "unknown_age",
+        "cached_news": cached,
+        "hours_since_refresh": None
     }

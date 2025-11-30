@@ -80,6 +80,11 @@ export default function Home() {
                                 AI Portfolio
                             </a>
                         </Link>
+                        <Link href="/portfolio-news">
+                            <a className="text-gray-400 hover:text-white transition-colors text-sm">
+                                Portfolio News
+                            </a>
+                        </Link>
                         <Link href="/profile">
                             <a className="text-gray-400 hover:text-white transition-colors text-sm">
                                 Profile

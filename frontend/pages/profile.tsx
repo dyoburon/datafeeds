@@ -785,6 +785,11 @@ export default function ProfilePage() {
                   AI Portfolio
                 </a>
               </Link>
+              <Link href="/portfolio-news">
+                <a className="text-gray-400 hover:text-white transition-colors text-sm">
+                  Portfolio News
+                </a>
+              </Link>
               <Link href="/profile">
                 <a className="text-white font-medium text-sm border-b-2 border-emerald-500 pb-1">
                   Profile

@@ -22,7 +22,8 @@ from src.user_service import (
     get_user_context, update_user_context, get_user_holdings, add_holding,
     update_holding, delete_holding, replace_all_holdings, get_full_user_profile,
     check_profile_completeness, get_cached_analysis, save_cached_analysis, 
-    should_regenerate_analysis
+    should_regenerate_analysis, get_cached_portfolio_news, save_cached_portfolio_news,
+    should_refresh_portfolio_news
 )
 from src.watchlist_service import get_watchlist_for_email, get_ticker_data, calculate_portfolio_max_drawdown
 from src.llm_service import LLMService
@@ -1021,6 +1022,169 @@ def update_portfolio_analysis_endpoint(user_id):
         
     except Exception as e:
         print(f"Portfolio analysis error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== PORTFOLIO NEWS ENDPOINT ==============
+
+@app.route('/api/users/<user_id>/portfolio-news', methods=['GET'])
+def get_portfolio_news_endpoint(user_id):
+    """
+    Get news and AI analysis for each stock in the user's portfolio.
+    
+    Uses caching - news is only refreshed once daily unless force_refresh=true.
+    
+    Query params:
+        force_refresh: 'true' to force refresh (bypass 24hr cache)
+    
+    Returns:
+        List of stocks with headlines and AI-generated analysis
+    """
+    try:
+        force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+        
+        # Check if we should use cached data
+        if not force_refresh:
+            refresh_check = should_refresh_portfolio_news(user_id)
+            
+            if not refresh_check.get('should_refresh') and refresh_check.get('cached_news'):
+                cached = refresh_check['cached_news']
+                return jsonify({
+                    "status": "success",
+                    "source": "cache",
+                    "stocks": cached['news'].get('stocks', []),
+                    "count": cached['news'].get('count', 0),
+                    "generated_at": cached.get('generated_at'),
+                    "hours_since_refresh": refresh_check.get('hours_since_refresh'),
+                    "next_refresh_in_hours": round(24 - refresh_check.get('hours_since_refresh', 0), 1) if refresh_check.get('hours_since_refresh') else None
+                })
+        
+        # Get user holdings
+        holdings_result = get_user_holdings(user_id)
+        
+        if 'error' in holdings_result:
+            return jsonify(holdings_result), 404
+        
+        holdings = holdings_result.get('holdings', [])
+        
+        if not holdings:
+            return jsonify({
+                "status": "success",
+                "stocks": [],
+                "message": "No holdings in portfolio"
+            })
+        
+        # Get unique tickers (exclude cash)
+        tickers = list(set([
+            h['ticker'] for h in holdings 
+            if h['ticker'].upper() not in ['CASH', '$CASH']
+        ]))
+        
+        if not tickers:
+            return jsonify({
+                "status": "success",
+                "stocks": [],
+                "message": "No stocks in portfolio (only cash)"
+            })
+        
+        # Fetch news data for all tickers
+        from src.watchlist_service import get_ticker_data
+        import concurrent.futures
+        
+        stock_data = []
+        
+        # Fetch data in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ticker = {
+                executor.submit(get_ticker_data, ticker): ticker 
+                for ticker in tickers
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                try:
+                    data = future.result()
+                    stock_data.append(data)
+                except Exception as e:
+                    ticker = future_to_ticker[future]
+                    stock_data.append({
+                        "ticker": ticker,
+                        "name": ticker,
+                        "error": str(e)
+                    })
+        
+        # Sort by ticker
+        stock_data.sort(key=lambda x: x.get('ticker', ''))
+        
+        # Analyze news for each stock with AI
+        analyzed_stocks = []
+        
+        for stock in stock_data:
+            ticker = stock.get('ticker', '')
+            company_name = stock.get('name', ticker)
+            news = stock.get('news', [])
+            perf = stock.get('performance', {})
+            
+            # Debug logging
+            print(f"[Portfolio News] {ticker}: {len(news)} news items, price: {perf.get('current_price')}")
+            
+            # Get top 3 headlines
+            headlines = [n.get('title', '') for n in news[:3] if n.get('title')]
+            
+            # Get price data
+            price_data = {
+                'price': perf.get('current_price'),
+                'change': perf.get('change'),
+                'change_percent': perf.get('change_percent')
+            }
+            
+            # Analyze with AI
+            analysis = llm_service.analyze_stock_news(
+                ticker=ticker,
+                company_name=company_name,
+                headlines=headlines,
+                price_data=price_data
+            )
+            
+            analyzed_stocks.append({
+                "ticker": ticker,
+                "company_name": company_name,
+                "sector": stock.get('sector', 'Unknown'),
+                "price": price_data.get('price'),
+                "change": price_data.get('change'),
+                "change_percent": price_data.get('change_percent'),
+                "headlines": headlines,
+                "news_count": len(news),
+                "analysis": {
+                    "summary": analysis.get('summary', ''),
+                    "sentiment": analysis.get('sentiment', 'neutral'),
+                    "key_themes": analysis.get('key_themes', []),
+                    "price_context": analysis.get('price_context', ''),
+                    "notable_headline": analysis.get('notable_headline', '')
+                },
+                "error": stock.get('error') or analysis.get('error')
+            })
+        
+        generated_at = __import__('datetime').datetime.now().isoformat()
+        
+        # Save to cache
+        news_data = {
+            "stocks": analyzed_stocks,
+            "count": len(analyzed_stocks)
+        }
+        save_cached_portfolio_news(user_id, news_data)
+        
+        return jsonify({
+            "status": "success",
+            "source": "generated",
+            "stocks": analyzed_stocks,
+            "count": len(analyzed_stocks),
+            "generated_at": generated_at,
+            "hours_since_refresh": 0,
+            "next_refresh_in_hours": 24
+        })
+        
+    except Exception as e:
+        print(f"Portfolio news error: {e}")
         return jsonify({"error": str(e)}), 500
 
 

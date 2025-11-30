@@ -615,3 +615,114 @@ Provide explanations at {explanation_level}.
         except Exception as e:
             print(f"LLM Portfolio Analysis Error: {e}")
             return {"error": f"Failed to generate analysis: {str(e)}"}
+
+    def analyze_stock_news(self, ticker: str, company_name: str, headlines: list, price_data: dict) -> dict:
+        """
+        Analyzes recent news headlines for a stock and explains recent price movements.
+        
+        Args:
+            ticker: Stock ticker symbol
+            company_name: Company name
+            headlines: List of recent news headlines (top 3)
+            price_data: Dict with price, change, change_percent
+        
+        Returns:
+            Dict with news analysis and explanation of recent moves
+        """
+        if not self.client:
+            return {"error": "LLM client not initialized"}
+        
+        if not headlines:
+            # Still provide price context even without news
+            price_summary = ""
+            if price_data.get('price'):
+                change_pct = price_data.get('change_percent', 0)
+                if change_pct > 2:
+                    price_summary = f"The stock is up {abs(change_pct):.2f}% today at ${price_data['price']:.2f}, suggesting positive market sentiment despite limited news coverage."
+                elif change_pct < -2:
+                    price_summary = f"The stock is down {abs(change_pct):.2f}% today at ${price_data['price']:.2f}. Without recent headlines, this may reflect broader market movements."
+                else:
+                    price_summary = f"The stock is trading relatively flat at ${price_data['price']:.2f} with no significant news driving the price."
+            
+            return {
+                "ticker": ticker,
+                "company_name": company_name,
+                "summary": f"No recent news headlines available for {company_name}. This could indicate a quiet period for the company or limited press coverage.",
+                "sentiment": "neutral",
+                "key_themes": ["Limited news coverage"],
+                "price_context": price_summary if price_summary else "Price data not available.",
+                "notable_headline": ""
+            }
+        
+        headlines_text = "\n".join([f"- {h}" for h in headlines[:3]])
+        
+        price_info = ""
+        if price_data.get('price'):
+            change_pct = price_data.get('change_percent', 0)
+            direction = "up" if change_pct > 0 else "down" if change_pct < 0 else "flat"
+            price_info = f"Current Price: ${price_data['price']:.2f}, {direction} {abs(change_pct):.2f}% today"
+        
+        prompt = f"""
+Analyze the following recent news headlines for {company_name} ({ticker}) and provide insights about recent company developments and potential price drivers.
+
+### Stock Info
+{price_info if price_info else "Price data not available"}
+
+### Recent Headlines
+{headlines_text}
+
+### Task
+Provide a concise analysis of what these headlines mean for the stock. Focus on:
+1. What the news tells us about the company's recent developments
+2. How this might be affecting recent price movements
+3. Key themes or trends emerging from the news
+
+### Important Guidelines
+- Be concise and actionable (2-4 sentences for summary)
+- Do NOT use emojis
+- Be objective and balanced
+- If news is mixed, acknowledge both positive and negative aspects
+
+### Output Format (JSON ONLY)
+{{
+    "summary": "2-4 sentence analysis of what the news means for this stock and recent price action",
+    "sentiment": "bullish|bearish|neutral|mixed",
+    "key_themes": ["Theme 1", "Theme 2"],
+    "price_context": "Brief explanation of how news relates to recent price movement",
+    "notable_headline": "The most significant headline and why it matters"
+}}
+"""
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
+            text = response.text.strip()
+            
+            # Clean up markdown
+            if text.startswith("```json"):
+                text = text[7:]
+            elif text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            
+            result = json.loads(text.strip())
+            result['ticker'] = ticker
+            result['company_name'] = company_name
+            result['headlines'] = headlines[:3]
+            return result
+            
+        except Exception as e:
+            print(f"LLM News Analysis Error for {ticker}: {e}")
+            return {
+                "ticker": ticker,
+                "company_name": company_name,
+                "headlines": headlines[:3],
+                "summary": "Unable to analyze news at this time.",
+                "sentiment": "neutral",
+                "key_themes": [],
+                "price_context": "",
+                "error": str(e)
+            }
